@@ -1,0 +1,1130 @@
+---
+title: "Exercise 2"
+author: By Eliza Malinova, Zhenghao Li, and Raushan Baizakova
+output: github_document 
+always_allow_html: yes
+--- 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning=FALSE)
+library(tidyverse)
+library(mosaic)
+library(foreach)
+library(MASS) 
+library(tidyverse)
+library(class)
+library(FNN)
+library(dplyr)
+library(knitr)
+library(kableExtra)
+library(data.table)
+library(jtools)
+library(sjPlot)
+library(sjmisc)
+library(sjlabelled)
+library(huxtable)
+library(MatrixModels)
+library(sjlabelled)
+```
+
+# Problem 1. Saratoga house prices
+## Question 1: What model outperforms the "medium" model considered in class? 
+
+*Medium Model:* price ~ lotSize + age + livingArea + pctCollege + bedrooms + fireplaces+bathrooms + rooms + heating + fuel + centralAir
+
+In this exercise, the purpose is to choose a model that outperforms the above medium model in predicting housing prices based on the dataset Saratoga. The dataset has 1728 observations and 16 variables including price, land value, age, rooms, and other house characteristics. The target variable is the price. Before building models, there is an issue about the target variable: a housing price consists of the land value and the house value. The land value is predetermined before a house is built and is less likely to be affected by those house characteristics. Moreover, the land value is an intrinsic part of a housing price. So, generally, the land value should be excluded from our feature variables to avoid regressing the target variable on a variable that is a part of the target variable itself. To tackle this issue, we used the following procedure.
+
+*Step 1.* Use price as the target variable: 
+
+1)	Manually build a model that has a lower RMSE than the medium model of price;
+
+2)	Use forward selection method to automatically select a model with the lowest AIC;
+
+3)	Compare the RMSE of the model manually built and the RMSE of the model forward selected, and choose the model with a lower RMSE.
+
+*Step 2.* Generate a new target variable, houseValue, by subtracting land value from the price:
+
+1)	Build a medium model using houseValue as the target variable and the same feature variables as in the medium model of Step 1;
+
+2)	Manually build a model that has a lower RMSE than above medium model of house value;
+
+3)	Use forward selection method to automatically select a model with the lowest AIC and compare the RMSE of the selected model with the RMSE of the manually built model, and choose the model with a lower RMSE.
+
+*Step 3.* Compare the chosen model in Step 1 with the chosen model in Step 2 and use the model with a lower RMSE to help predict the housing price.
+
+Table 1.1 shows the models we compared in Step 1.
+
+``` {r results='asis'}
+x=matrix(c("Baseline Model 1 (Medium Model)", 
+           "price = lotSize + age + livingArea + pctCollege + bedrooms + fireplaces+bathrooms + rooms + heating + fuel + centralAir", 
+           "Price Model 1 (Manually Built Model)", 
+           "price = rooms + bathrooms + bathrooms*rooms + lotSize + newConstruction+livingArea + livingArea*rooms + lotSize * livingArea + pctCollege + heating + fuel + livingArea * (heating + fuel) + centralAir + waterfront",
+           "Price Model 2 (Forward Selected Model)",
+           "price = livingArea + landValue + bathrooms + waterfront + newConstruction + heating + lotSize + age + centralAir + rooms + bedrooms + landValue * newConstruction + bathrooms * heating + livingArea * bathrooms + lotSize * age + livingArea * waterfront + landValue * lotSize + livingArea * centralAir + age * centralAir + livingArea * landValue + bathrooms * bedrooms + bathrooms * waterfront + heating * bedrooms + heating * rooms + waterfront * centralAir + waterfront * lotSize + landValue * age + age * rooms + livingArea * lotSize + lotSize * rooms + lotSize * centralAir",
+           "Price Model 2.1 (Forward Selected Model without landValue)",
+           "price = livingArea + bathrooms + waterfront + newConstruction + heating+lotSize + age + centralAir + rooms + bedrooms + bathrooms * heating + livingArea * bathrooms + lotSize * age + livingArea * waterfront + livingArea * centralAir + age * centralAir + bathrooms * bedrooms + bathrooms * waterfront + heating * bedrooms + heating * rooms + waterfront * centralAir + waterfront * lotSize + age * rooms+livingArea * lotSize + lotSize * rooms + lotSize * centralAir")
+, nrow=8, ncol=1)
+kable(x, caption="**Table 1.1 : Models With Price As the Target Variable**")%>%
+  kable_styling(position="center", full_width = NULL)
+
+```
+
+All the models are measured by the average out-of-sample RMSE.  After randomly splitting the dataset into a train data set and a test dataset, we ran three models in the train dataset, and then used the test dataset to get an out-of-sample RMSE for each model. We repeated this procedure for 100 times and then took the average of all out-of-sample RMSE. The average out-of-sample RMSE are listed in the following table.
+
+```{r, results='asis'}
+data(SaratogaHouses)
+
+
+SaratogaHouses = mutate(SaratogaHouses, houseValue = price - landValue)
+SaratogaHouses = mutate(SaratogaHouses, RoomsNoBed = rooms - bedrooms)
+
+
+
+rmse = function(y, yhat) {
+  sqrt( mean( (y - yhat)^2 ) )}
+
+
+LoopRMSE = do(100)*{
+    n = nrow(SaratogaHouses)
+    n_train = round(0.8*n)  # round to nearest integer
+    n_test = n - n_train
+    train_cases = sample.int(n, n_train, replace=FALSE)
+    test_cases = setdiff(1:n, train_cases) 
+    saratoga_train = SaratogaHouses[train_cases,]
+    saratoga_test = SaratogaHouses[test_cases,]
+    
+    lm_medium = lm(price ~ lotSize + age + livingArea + pctCollege + bedrooms + 
+                     fireplaces + bathrooms + rooms + heating + fuel + centralAir, data=saratoga_train)
+    #improved model for price that includes land value 
+    lm_price = lm(price ~ rooms + bathrooms + bathrooms*rooms  + lotSize + newConstruction
+                  + livingArea + livingArea*rooms + lotSize*livingArea + pctCollege + heating + fuel 
+                  +livingArea*(heating + fuel) + centralAir + waterfront
+                  ,data=saratoga_train)
+    
+    lm_price1 = lm(price ~ livingArea + landValue + bathrooms + waterfront + newConstruction + 
+                     heating + lotSize + age + centralAir + rooms + bedrooms + 
+                     landValue:newConstruction + bathrooms:heating + livingArea:bathrooms + 
+                     lotSize:age + livingArea:waterfront + landValue:lotSize + 
+                     livingArea:centralAir + age:centralAir + livingArea:landValue + 
+                     bathrooms:bedrooms + bathrooms:waterfront + heating:bedrooms + 
+                     heating:rooms + waterfront:centralAir + waterfront:lotSize + 
+                     landValue:age + age:rooms + livingArea:lotSize + lotSize:rooms + 
+                     lotSize:centralAir, data=saratoga_train)
+    
+    
+    lm_price2 = lm(price ~ livingArea +  bathrooms + waterfront + newConstruction + heating + lotSize + age +
+                     centralAir + rooms + bedrooms + bathrooms:heating + livingArea:bathrooms + 
+                     lotSize:age + livingArea:waterfront +  livingArea:centralAir + age:centralAir  + 
+                     bathrooms:bedrooms + bathrooms:waterfront + heating:bedrooms + heating:rooms + 
+                     waterfront:centralAir + waterfront:lotSize + age:rooms + livingArea:lotSize + lotSize:rooms + 
+                     lotSize:centralAir
+                   ,data=saratoga_train)
+    
+  
+    
+    yhat_test_medium = predict(lm_medium, saratoga_test)
+    yhat_test_price = predict(lm_price, saratoga_test)
+    yhat_test_price1 = predict(lm_price1, saratoga_test)
+    yhat_test_price2 = predict(lm_price2, saratoga_test)
+  
+    
+    c(RmseMedium=rmse(saratoga_test$price, yhat_test_medium), 
+      rmsePrice =rmse(saratoga_test$price, yhat_test_price), 
+      RmsePrice1 = rmse(saratoga_test$price, yhat_test_price1),
+      RmsePrice2 = rmse(saratoga_test$price, yhat_test_price2)) 
+    
+  }
+RMSEMean = rbind("Baseline Model 1 " = mean(LoopRMSE$RmseMedium), 
+                      "Price Model 1 " = mean(LoopRMSE$rmsePrice), 
+                      "Price Model 2 " = mean(LoopRMSE$RmsePrice1),
+                      "Price Model 2.1 " = mean(LoopRMSE$RmsePrice2))
+
+kable(RMSEMean, caption="**Table 1.2 : RMSE for Price Models of Step 1**")%>%
+  kable_styling(full_width = FALSE)%>%
+  column_spec(1, width = "10em")
+```
+
+According to the above table, the Price Model 2 has the lowest average out-of-sample (usually around 58000, sometimes even below 57000). However, the Price Model 2 includes the variable landValue as a feature variable, which is a part of price. Therefore, the low RMSE of Price Model 2 is probably from using a part of the target variable to explain the outcome, which disturbs the assessment of the predictive abilities of the feature variables. To see that, we ran the Price Model 2 after removing landValue and its interactions with other feature variables on the right-hand side. The resulted RMSE (of Price Model 2.1) increased to around 64000, though still lower than the Baseline Model 1.
+
+To address this problem, we implemented the Step 2, building three models with the houseValue as the target variable, as shown in Table 1.3
+
+``` {r results='asis'}
+x=matrix(c("Baseline Model 2 (Medium Model of houseValue)", 
+           "houseValue = lotSize + age + livingArea + pctCollege + bedrooms + fireplaces + bathrooms + rooms + heating + fuel + centralAir", 
+           "House Value Model 1 (Manually Built Model)", 
+           "houseValue = landValue + rooms + bathrooms + bathrooms*rooms + lotSize + newConstruction+ livingArea + livingArea * rooms+lotSize * livingArea + pctCollege + heating + fuel  +livingArea * heating + livingArea * fuel+centralAir + waterfront",
+           "House Value Model 2 (Forward Selected Model)",
+           "houseValue = livingArea + bathrooms + waterfront + newConstruction + heating + lotSize + age + rooms + centralAir + landValue + bedrooms + bathrooms * heating + livingArea * bathrooms + lotSize * age + livingArea * newConstruction + livingArea * waterfront + livingArea * centralAir + age * centralAir + newConstruction * landValue + lotSize * landValue + livingArea * landValue + bathrooms * bedrooms + bathrooms * newConstruction + heating * bedrooms + heating * rooms + bathrooms * waterfront + waterfront * centralAir + waterfront * lotSize + age * landValue + age * rooms + livingArea * lotSize + lotSize * rooms + lotSize * centralAir"), nrow=6, ncol=1)
+kable(x, caption="**Table 1.3 : Models With houseValue As the Target Variable**")%>%
+  kable_styling(position="center", full_width = NULL)
+
+```
+
+The Baseline Model 2 has the same feature variables as the Baseline Model 1. The main difference between HouseValue Model 1 and Price Model 1 is that HouseValue Model 1 includes landvalue but Price Model 1 does not. We are now free to include landvalue as a feature variable since it is not part of the target variable anymore. 
+
+House Value Model 2 was picked by the forward selection. The average out-of-sample RMSE are shown in Table 1.4.
+
+```{r, results='asis'}
+data(SaratogaHouses)
+
+
+SaratogaHouses = mutate(SaratogaHouses, houseValue = price - landValue)
+SaratogaHouses = mutate(SaratogaHouses, RoomsNoBed = rooms - bedrooms)
+
+
+
+rmse = function(y, yhat) {
+  sqrt( mean( (y - yhat)^2 ) )}
+
+
+LoopRMSE = do(100)*{
+    n = nrow(SaratogaHouses)
+    n_train = round(0.8*n)  # round to nearest integer
+    n_test = n - n_train
+    train_cases = sample.int(n, n_train, replace=FALSE)
+    test_cases = setdiff(1:n, train_cases) 
+    saratoga_train = SaratogaHouses[train_cases,]
+    saratoga_test = SaratogaHouses[test_cases,]
+    
+  
+    lm_medium2 = lm(houseValue ~ lotSize + age + livingArea + pctCollege + bedrooms + 
+                     fireplaces + bathrooms + rooms + heating + fuel + centralAir, data=saratoga_train)
+    
+    lm_houseValue = lm(houseValue ~ landValue + rooms + bathrooms + bathrooms*rooms  + lotSize + newConstruction
+                       + livingArea + livingArea*rooms + lotSize*livingArea + pctCollege + heating + fuel 
+                       +livingArea*(heating + fuel) + centralAir + waterfront , data=saratoga_train)
+    
+    lm_houseValue2 = lm(houseValue ~ livingArea + bathrooms + waterfront + newConstruction + 
+                          heating + lotSize + age + rooms + centralAir + landValue + 
+                          bedrooms + bathrooms:heating + livingArea:bathrooms + lotSize:age + 
+                          livingArea:newConstruction + livingArea:waterfront + livingArea:centralAir + 
+                          age:centralAir + newConstruction:landValue + lotSize:landValue + 
+                          livingArea:landValue + bathrooms:bedrooms + bathrooms:newConstruction + 
+                          heating:bedrooms + heating:rooms + bathrooms:waterfront + 
+                          waterfront:centralAir + waterfront:lotSize + age:landValue + 
+                          age:rooms + livingArea:lotSize + lotSize:rooms + lotSize:centralAir, 
+                        data=saratoga_train)
+    
+   
+    yhat_test_medium2 = predict(lm_medium2, saratoga_test)+saratoga_test$landValue
+    yhat_test_housevalue_price=predict(lm_houseValue, saratoga_test) + saratoga_test$landValue
+    yhat_test_housevalue_price2=predict(lm_houseValue2, saratoga_test) + saratoga_test$landValue
+    
+    c(
+      RmseMedium2=rmse(saratoga_test$price, yhat_test_medium2),
+      RrmseHouseValueprice1 = rmse(saratoga_test$price, yhat_test_housevalue_price),
+      RmseHouseValueprice2 = rmse(saratoga_test$price, yhat_test_housevalue_price2)) 
+    
+  }
+RMSEMean = rbind("Baseline Model 2 " = mean(LoopRMSE$RmseMedium2),
+                      "House Value Model 1 " = mean(LoopRMSE$RrmseHouseValueprice1),
+                      "House Value Model 2 " = mean(LoopRMSE$RmseHouseValueprice2))
+
+kable(RMSEMean, caption="**Table 1.4 : RMSE for HouseValue Models of Step 2**")
+
+```
+
+The results show that the House Value Model 1 and House Value Model 2 both have the average out-of-sample RMSE around 59000. This value is much lower than that of Price Model 2.1, but close to that of Price Model 2 that regresses price on landValue and other characteristics. 
+
+Therefore, based on the average out-of-sample RMSE, we can choose either House Value Model 1 or House Value Model 2. If we prefer a more parsimonious model, House Value Model 1 is to be selected. If preferring a lower AIC, House Value Model 2 is to be selected since forward selection in default returns the model with the lowest AIC. But both have much lower RMSE than the Baseline Model 2 as well as Baseline Model 1. 
+
+Note that since HouseValue models predict house values nor house prices, we need to add those corresponding land values to predicted house values when predicting prices.
+
+## Question 2: Which Variables or Interactions Drive Prices More?
+In this part, we decide to use a more parsimonious model, House Value Model 1, to examine feature variables' coefficients. To see which variables and interactions are extremely strong in driving the price, we list the estimates of coefficients in the Table 1.5.
+
+```{r, results='asis'}
+data(SaratogaHouses)
+
+SaratogaHouses = mutate(SaratogaHouses, houseValue = price - landValue)
+SaratogaHouses = mutate(SaratogaHouses, RoomsNoBed = rooms - bedrooms)
+
+    lm_houseValue = lm(houseValue ~ landValue + rooms + bathrooms + bathrooms*rooms  + lotSize + newConstruction
+                       + livingArea + livingArea*rooms + lotSize*livingArea + pctCollege + heating + fuel 
+                       +livingArea*(heating + fuel) + centralAir + waterfront , data=SaratogaHouses)
+
+tab_model(lm_houseValue, transform = NULL, dv.labels = 
+            c( "House Value Model 1"), string.est = "Coefficients", show.ci=0.95, title = "**Table 1.5 Coefficients of House Value Model 1**",  show.obs= FALSE, show.r2= FALSE)
+    
+```
+
+A brief look tells us that those variables and interactions with significant coefficients can be candidates of extremely strong drivers of prices. Such variables include the size of lot (lotSize),  if the house is newly constructed (newConstructionNo), the living area, type of heating system (hot water/steam and electric), the sources of heating (fuel), if a house includes waterfront (waterfrontNo),  and the interactions between the living area and heating as well as the living area and fuel.
+
+To decide their relative strength in driving prices, we ran nine different modifications of the House Value Model 1 but for each of the nine models we excluded the specific variable of interest from the House Value Model 1. Afterwards, we got the average out-of-sample RMSE for each of these 9 models. The higher the average out-of-sample RMSE of a model relative to that of the House Value Model 1, the stronger is that excluded variable as a price driver. We subtracted the House Value Model 1's average RMSE from each of the nine models' average RMSE to see the impact of the excluded variables. The results are shown in Table 1.6
+
+``` {r, results='asis'}
+data(SaratogaHouses)
+
+SaratogaHouses = mutate(SaratogaHouses, houseValue = price - landValue)
+SaratogaHouses = mutate(SaratogaHouses, RoomsNoBed = rooms - bedrooms)
+
+rmse = function(y, yhat) {
+  sqrt( mean( (y - yhat)^2 ) )}
+                  
+LoopRMSE2 = do(500)*{
+  n = nrow(SaratogaHouses)
+  n_train = round(0.8*n)  # round to nearest integer
+  n_test = n - n_train
+  train_cases = sample.int(n, n_train, replace=FALSE)
+  test_cases = setdiff(1:n, train_cases) 
+  saratoga_train = SaratogaHouses[train_cases,]
+  saratoga_test = SaratogaHouses[test_cases,]
+  
+  lm_houseValue = lm(houseValue ~ landValue + rooms + bathrooms + bathrooms*rooms  + lotSize + newConstruction
+                       + livingArea + livingArea*rooms + lotSize*livingArea + pctCollege + heating + fuel 
+                       +livingArea*(heating + fuel) + centralAir + waterfront , data=saratoga_train)
+  
+  model_lotsize = lm(houseValue ~ landValue + rooms + bathrooms + bathrooms*rooms  + newConstruction
+                     + livingArea + livingArea*rooms + lotSize*livingArea + pctCollege + heating + fuel 
+                     +livingArea*(heating + fuel) + centralAir + waterfront , data=saratoga_train)
+  
+  model_necon = lm(houseValue ~ landValue + rooms + bathrooms + bathrooms*rooms  + lotSize 
+                     + livingArea + livingArea*rooms + lotSize*livingArea + pctCollege + heating + fuel 
+                     +livingArea*(heating + fuel) + centralAir + waterfront , data=saratoga_train)
+  
+  model_lva = lm(houseValue ~ landValue + rooms + bathrooms + bathrooms*rooms  + lotSize + newConstruction
+                     + livingArea*rooms + lotSize*livingArea + pctCollege + heating + fuel 
+                     +livingArea*(heating + fuel) + centralAir + waterfront , data=saratoga_train)
+  
+  model_heating = lm(houseValue ~ landValue + rooms + bathrooms + bathrooms*rooms  + lotSize + newConstruction
+                     + livingArea + livingArea*rooms + lotSize*livingArea + pctCollege + fuel 
+                     +livingArea*(heating + fuel) + centralAir + waterfront , data=saratoga_train)
+  
+  model_fuel = lm(houseValue ~ landValue + rooms + bathrooms + bathrooms*rooms  + lotSize + newConstruction
+                     + livingArea + livingArea*rooms + lotSize*livingArea + pctCollege + heating  
+                     +livingArea*(heating + fuel) + centralAir + waterfront , data=saratoga_train)
+  
+  model_water = lm(houseValue ~ landValue + rooms + bathrooms + bathrooms*rooms  + lotSize + newConstruction
+                     + livingArea + livingArea*rooms + lotSize*livingArea + pctCollege + heating + fuel 
+                     +livingArea*(heating + fuel)   , data=saratoga_train)
+  
+  model_centra = lm(houseValue ~ landValue + rooms + bathrooms + bathrooms*rooms  + lotSize + newConstruction
+                     + livingArea + livingArea*rooms + lotSize*livingArea + pctCollege + heating + fuel 
+                     +livingArea*(heating + fuel)  + waterfront , data=saratoga_train)
+  
+  model_lva_heat = lm(houseValue ~ landValue + rooms + bathrooms + bathrooms*rooms  + lotSize + newConstruction
+                     + livingArea + livingArea*rooms + lotSize*livingArea + pctCollege + heating + fuel 
+                     +livingArea*( fuel) + centralAir + waterfront , data=saratoga_train)
+  
+  
+  model_lva_fuel = lm(houseValue ~ landValue + rooms + bathrooms + bathrooms*rooms  + lotSize + newConstruction
+                     + livingArea + livingArea*rooms + lotSize*livingArea + pctCollege + heating + fuel 
+                     +livingArea*(heating ) + centralAir + waterfront , data=saratoga_train)
+  
+  yhat_test_housevalue_price=predict(lm_houseValue, saratoga_test) + saratoga_test$landValue
+  yhat_test1 = predict(model_lotsize, saratoga_test) + saratoga_test$landValue
+  yhat_test2 = predict(model_necon, saratoga_test) + saratoga_test$landValue
+  yhat_test3 = predict(model_lva, saratoga_test) + saratoga_test$landValue
+  yhat_test4 = predict(model_heating, saratoga_test) + saratoga_test$landValue
+  yhat_test5 = predict(model_fuel, saratoga_test) + saratoga_test$landValue
+  yhat_test6 = predict(model_water, saratoga_test) + saratoga_test$landValue
+  yhat_test7 = predict(model_centra, saratoga_test) + saratoga_test$landValue
+  yhat_test8 = predict(model_lva_heat, saratoga_test) + saratoga_test$landValue
+  yhat_test9 = predict(model_lva_fuel, saratoga_test) + saratoga_test$landValue
+  
+  c(
+    Rmse1=rmse(saratoga_test$price, yhat_test1)-rmse(saratoga_test$price, yhat_test_housevalue_price), 
+    Rmse2 =rmse(saratoga_test$price, yhat_test2)-rmse(saratoga_test$price, yhat_test_housevalue_price), 
+    Rmse3 = rmse(saratoga_test$price, yhat_test3)-rmse(saratoga_test$price, yhat_test_housevalue_price),
+    Rmse4 = rmse(saratoga_test$price, yhat_test4)-rmse(saratoga_test$price, yhat_test_housevalue_price),
+    Rmse5 =rmse(saratoga_test$price, yhat_test5)-rmse(saratoga_test$price, yhat_test_housevalue_price),
+    Rmse6 = rmse(saratoga_test$price, yhat_test6)-rmse(saratoga_test$price, yhat_test_housevalue_price),
+    Rmse7 = rmse(saratoga_test$price, yhat_test7)-rmse(saratoga_test$price, yhat_test_housevalue_price),
+    Rmse8 = rmse(saratoga_test$price, yhat_test8)-rmse(saratoga_test$price, yhat_test_housevalue_price),
+    Rmse9 = rmse(saratoga_test$price, yhat_test9)-rmse(saratoga_test$price, yhat_test_housevalue_price)) 
+  
+}
+RMSEMeanDiff = rbind("lotSize" = mean(LoopRMSE2$Rmse1), 
+                      "NewConstruction" = mean(LoopRMSE2$Rmse2) , 
+                      "livingArea" = mean(LoopRMSE2$Rmse3) ,
+                      "heating" = mean(LoopRMSE2$Rmse4) ,
+                      "fuel" = mean(LoopRMSE2$Rmse5) ,
+                      "waterfront" = mean(LoopRMSE2$Rmse6) ,
+                      "centralAir" = mean(LoopRMSE2$Rmse7),
+                      "livingArea*heating" = mean(LoopRMSE2$Rmse8) ,
+                      "livingArea*fuel" = mean(LoopRMSE2$Rmse9))
+
+
+RMSEMeanDiff=round(RMSEMeanDiff, 2)
+
+kable(RMSEMeanDiff, caption = "**Table 1.6 Use Changes in RMSE to Evaluate Price Drivers**")
+```
+
+From the difference in RMSE, we can see that five variables have very strong impact on prices: waterfront,
+newConstruction, livingArea * heating, and livingArea * fuel and centralAir. Other variables are not strong drivers of prices from the a perspective of RMSE.
+
+Hence, coefficients and RMSE tell us some different results about which variables and interactions are driving prices more. By coefficients, variables like lotSize, heaing, and fuel are strong in driving prices while according to the RMSE they have no such significant impact on prices. And variables like livingArea * heating are important to drive prices based on RMSE but their magnitudes are too small from the perspective of coefficients. Combining the results of two approaches, it may be less disputable to conclude that waterfront, newConstruction, and centralAir are three most important factors in driving prices.
+
+## Question 3: The Performance of KNN Method
+Now we use KNN regression to predict prices. The approach is similar: first, use price as the target variable, then use house value as the target variable, at last, choose the model (i.e. choose the value of K) with a lower RMSE and compare it with the RMSE we have gotten in Q 1.1.
+A special aspect in KNN regression is that since the distances between K points are very sensitive to the magnitudes of variables, all the variables have to be standardized by their standard deviations at first. Except that, the whole procedure is the same as in linear regression.
+Table 6 shows the lowest average out-of-sample RMSE and corresponding K values for price KNN model and house value KNN model. We also show how the average out-of-sample RMSE vary with the different values of K in Graph 1 (for price model) and Graph 2 (for house value model).
+
+```{r, results='asis', fig.align='left'}
+
+knn_result2=data.frame(k=c(), rsme=c(), sd=c())
+k_grid = seq(2, 50, by=1)
+
+LoopKNN2 = foreach(k=k_grid, .combine='c') %do% {
+  out = do(100)*{
+    n = nrow(SaratogaHouses)
+    n_train = round(0.8*n)  # round to nearest integer
+    n_test = n - n_train
+    train_cases = sample.int(n, n_train, replace=FALSE)
+    test_cases = setdiff(1:n, train_cases)
+    saratoga_train = SaratogaHouses[train_cases,]
+    saratoga_test = SaratogaHouses[test_cases,]
+    k_grid = seq(2, 50, by=1)
+    
+    Xtrain = model.matrix(~.- (houseValue + price) - 1,data=saratoga_train)
+    Xtest = model.matrix(~.- (houseValue + price) - 1,data=saratoga_test)
+    Ytrain = saratoga_train$houseValue
+    Ytest = saratoga_test$houseValue
+    Ytrain1 = saratoga_train$price
+    Ytest1 = saratoga_test$price
+    
+    scales = apply(Xtrain, 2, sd)
+    Xtrain_scaled = scale(Xtrain, scale=scales)
+    Xtest_scaled = scale(Xtest, scale=scales)
+    
+    knnPred1 = knn.reg(Xtrain_scaled, Xtest_scaled, Ytrain1, k=k)
+    
+    
+    knnPred = knn.reg(Xtrain_scaled, Xtest_scaled, Ytrain, k=k)
+    c(rmseKNN1= rmse(Ytest1, knnPred1$pred), rmseKNN = rmse(Ytest, knnPred$pred))
+    
+  }
+  knn_result2=rbind(knn_result2,c(k, mean(out$rmseKNN1), mean(out$rmseKNN)))
+}
+colnames(knn_result2)=c("K", "Mean_RMSE1", "Mean_RMSE")
+MinimumMean1= data.table::data.table("Models"="The Price Model", "Minimum Mean"=min(knn_result2$`Mean_RMSE1`), 
+                                    "K"=knn_result2$`K`[knn_result2$`Mean_RMSE1`==min(knn_result2$`Mean_RMSE1`)])
+MinimumMean= data.table::data.table("Models"="The House Value Model","Minimum Mean"=min(knn_result2$`Mean_RMSE`), 
+                                    "K"=knn_result2$`K`[knn_result2$`Mean_RMSE`==min(knn_result2$`Mean_RMSE`)])
+c=rbind(MinimumMean1, MinimumMean)
+
+kable(c, caption = "**Table 1.7 Minimum RMSE and Corresponding K**")
+
+ggplot(data=knn_result2)+
+  geom_line(aes(x=K, y=Mean_RMSE1), color="blue", size=1)+
+  geom_point(aes(x=knn_result2$`K`[knn_result2$`Mean_RMSE1`==min(knn_result2$`Mean_RMSE1`)], 
+                 y=min(knn_result2$`Mean_RMSE1`)), color="red", size=3)+
+  labs(title = "Graph 1.1 Average RMSE of K Values For the Price Model", y="RMSE")+
+  theme_bw()+
+  theme(plot.title = element_text(hjust = 0.5))+
+  scale_x_discrete(limit = c(knn_result2$`K`[knn_result2$`Mean_RMSE1`==min(knn_result2$`Mean_RMSE1`)],  
+                                10,  20,  30, 40, 50))+
+  geom_vline(xintercept=knn_result2$`K`[knn_result2$`Mean_RMSE1`==min(knn_result2$`Mean_RMSE1`)], 
+             linetype="dotted", size=1)
+
+ggplot(data=knn_result2)+
+  geom_line(aes(x=K, y=Mean_RMSE), color="blue", size=1)+
+  geom_point(aes(x=knn_result2$`K`[knn_result2$`Mean_RMSE`==min(knn_result2$`Mean_RMSE`)], 
+                 y=min(knn_result2$`Mean_RMSE`)), color="red", size=3)+
+  labs(title = "Graph 1.2 Average RMSE of K Values For the House Value Model", y="RMSE")+
+  theme_bw()+
+  theme(plot.title = element_text(hjust = 0.5))+
+  scale_x_discrete(limit = c(knn_result2$`K`[knn_result2$`Mean_RMSE`==min(knn_result2$`Mean_RMSE`)],  
+                                10,  20,  30, 40, 50))+
+  geom_vline(xintercept=knn_result2$`K`[knn_result2$`Mean_RMSE`==min(knn_result2$`Mean_RMSE`)], 
+             linetype="dotted", size=1)
+```
+
+Based on above table and graph, we can conclude: first, house value KNN model has a lower "lowest average out-of-sample RMSE". So similar to the case of the linear model, house value also performs better as a target variable in KNN regression. Second, compared to linear models with the price as the target variable, the price KNN regression has a lower minimum average out-of-sample RMSE for some K values. However, compared to linear models with the house value as the target variable, house value KNN doesn't perform better since its minimum average out-of-sample is usually higher than that of the linear model. Therefore, based on the RMSE as a measurement of the model performance in predicting house prices, linear model is a better choice if the target variable is a house value, while the KNN regression is better if the target value is the price. Generally, from the perspectives of a lower RMSE than the "medium" model's RMSE, this report suggests using House Value Model 1 to predict the market values of properties. We recommend House Value Model 1 because this model is more parsimonious and more reasonable than House Value Model 2, even though House Value Model 2 has a slightly lower average RMSE. 
+
+# Problem 2: A hospital audit
+
+In problem 2, we examine the performance of the radiologists by answering two questions. The first question has the goal to observe how clinically conservative each radiologist is in recalling patients. The second question intends to answer whether radiologists weigh less importance on some risk factor that should actually be considered more rigorously when making a recall decision. 
+
+## Question 1: Are some radiologists more clinically conservative than others in recalling patients, holding patient risk factors equal?
+
+First, we compare the performance of three logistic models shown below, that regress recall on different risk factors. We use out-of-sample accuracy rates and out-of-sample error rates as model performance measures. By evaluating the accuracy rate, we examine how accurate our model is in making predictions. We also compute error rate, which is the opposite of a model's accuracy, to examine the rate of misfits.
+
+**Model 1** Recall<sub>&beta;</sub> = &beta;<sub>1</sub> age + &beta;<sub>2</sub> history + &beta;<sub>3</sub> symptoms + &beta;<sub>4</sub> menopause + &beta;<sub>5</sub> density + &beta;<sub>6</sub> radiologist + &beta;<sub>7</sub> radiologist* age + &beta;<sub>8</sub> radiologist* history + &beta;<sub>9</sub> radiologist* symptoms + &beta;<sub>10</sub> radiologist* menopause + &beta;<sub>11</sub> radiologist*density 
+ 
+**Model 2:** Recall<sub>&beta;</sub> = &beta;<sub>1</sub> age + &beta;<sub>2</sub> history + &beta;<sub>3</sub> symptoms + &beta;<sub>4</sub> menopause + &beta;<sub>5</sub> density + &beta;<sub>6</sub> radiologist 
+
+**Model 3:** Recall<sub>&beta;</sub> = &beta;<sub>1</sub> age + &beta;<sub>2</sub> symptoms + &beta;<sub>3</sub> age * symptoms + &beta;<sub>4</sub> history + &beta;<sub>5</sub> menopause + &beta;<sub>6</sub> density + &beta;<sub>7</sub> radiologist 
+
+We performed 100 simulations on each model and computed the average out-of-sample accuracy rate and the average out-of-sample error rate for each of the three models. Based on these performance rates, we decided which model to use to predict the probabilities of recall for each radiologist. All three models have high out of sample performance; however, models 2 and 3 have higher out of sample accuracy rates and lower error rates on average than model 1. 
+
+Table 2.1 displays the average out of sample accuracy rates and error rates for each of the three models.
+
+```{r setup 2.1.1, warning=FALSE, echo=FALSE}
+#train a good logit model on the raw data
+#Check the Accuracy of each Model; Split up the model into Accuracy&Error table vs RMSE Table 
+brca <- read.csv("https://raw.githubusercontent.com/jgscott/ECO395M/master/data/brca.csv")
+RecallResponse = do(100)* {
+  n = nrow(brca)
+  ntrain = n*0.9
+  ntest = n - n*0.9
+  TrainSet = sample.int(n, ntrain, replace = FALSE)
+  TestSet = setdiff(1:n, TrainSet)
+  Brca_Train = brca[TrainSet,]
+  Brca_Test = brca[TestSet,]
+  
+  logit_brca1 = glm(recall ~ age + history + symptoms + menopause + density + radiologist+
+                   radiologist*(age+history+symptoms+menopause+density), data=Brca_Train,
+                  family ='binomial')
+  logit_brca2 = glm(recall ~ age + history + symptoms + menopause + density + radiologist,  
+                     data=Brca_Train,
+                    family ='binomial')
+  logit_brca3 = glm(recall ~ (age + symptoms)^2+ history  + menopause + density + radiologist,  
+                    data=Brca_Train,
+                    family ='binomial')
+  
+  phatTest_logitBrca1 = predict(logit_brca1, Brca_Test, type = 'response')
+  yhatTest_logit1=ifelse(phatTest_logitBrca1>0.5,1,0)
+  
+  phatTest_logitBrca2 = predict(logit_brca2, Brca_Test, type = 'response')
+  yhatTest_logit2=ifelse(phatTest_logitBrca2>0.5,1,0)
+  
+  phatTest_logitBrca3 = predict(logit_brca3, Brca_Test, type = 'response')
+  yhatTest_logit3=ifelse(phatTest_logitBrca3>0.5,1,0)
+  
+  confusion_out1=table(y=Brca_Test$recall, yhat=yhatTest_logit1)
+  confusion_out2=table(y=Brca_Test$recall, yhat=yhatTest_logit2)
+  confusion_out3=table(y=Brca_Test$recall, yhat=yhatTest_logit3)
+  
+  c(
+   ClasAccuracyOut1 = sum(diag(confusion_out1))/sum(confusion_out1), 
+   ClasAccuracyOut2 = sum(diag(confusion_out2))/sum(confusion_out2),
+   ClasAccuracyOut3 = sum(diag(confusion_out3))/sum(confusion_out3),
+   ClassErrors1 = sum(yhatTest_logit1 != Brca_Test$recall)/ntest, 
+   ClassErrors2 = sum(yhatTest_logit2 != Brca_Test$recall)/ntest,
+   ClassErrors3 = sum(yhatTest_logit3 != Brca_Test$recall)/ntest)
+}
+Means = data.table::data.table("Accuracy Rate of Model 1" = round(mean(RecallResponse$ClasAccuracyOut1),4), 
+                   "Accuracy Rate of Model 2"  = round(mean(RecallResponse$ClasAccuracyOut2),4),
+                   "Accuracy Rate of Model 3"  = round(mean(RecallResponse$ClasAccuracyOut3),4),
+                   "Error Rate of Model 1" = round(mean(RecallResponse$ClassErrors1),4),
+                   "Error Rate of Model 2" = round(mean(RecallResponse$ClassErrors2),4),
+                   "Error Rate of Model 3" = round(mean(RecallResponse$ClassErrors3),4))
+
+view(Means)
+
+means_transpose <- t(Means)
+
+view(means_transpose)
+
+kable(means_transpose[1:6,], col.names = c("Mean"), caption = "**Table 2.1 Average Model Performance Rates**", caption_format = c("bold", "underline")) %>%
+  kable_styling(bootstrap_options = "striped", full_width = F) #%>%
+  #footnote(symbol = "Table2.1")
+```
+
+We use two indicators to determine which radiologists are more clinically conservative and which are less. The first approach is to examine the radiologists' coefficients, computing odds, and compare them while holding all risk factors constant. The second approach is to compare their overall predicted probabilities of recalling a patient. 
+
+We decided to use model 2 to run a logistic regression and compare the coefficients of each radiologist variable. The coefficient of radiologist 89 is the highest. Therefore, given that radiologist 89 is making the recall decision, the odds of a recall is multiplied by exp(0.46) ~ 1.59, compared to radiologist 13, holding all risk factors constant. Hence, out of all five radiologists, 89 is the most clinically conservative in recalling patients. On the other hand, radiologist 34 has the lowest coefficient, so if this radiologist is making the recall decision, the odds of a recall are multiplied by exp(-0.52) ~ 0.59, compared to radiologist 13, holding all other variables constant. Therefore, radiologist 34 is the least clinically conservative in recalling patients and he has the highest threshold for wanting to double check the patient's results.
+
+Table 2.2 shows the coefficients resulting from the regression model 2.
+
+```{r setup 2.1.2, warning=FALSE, echo=FALSE, results = 'asis'}
+brca <- read.csv("https://raw.githubusercontent.com/jgscott/ECO395M/master/data/brca.csv")
+logit_brca_rd1 = glm(recall ~ age + history + symptoms + menopause + density + radiologist,  
+                     data=brca,
+                     family ='binomial')
+
+tab_model(logit_brca_rd1, transform = NULL, dv.labels = "Model 2", show.ci=FALSE, show.r2 = FALSE, show.obs = FALSE, string.est = "Coefficients", title = "**Table 2.2 Coefficients of Model 2**")
+
+```
+
+Table 2.3 displays the odds ratios, confidence intervals and p-values estimated from regressing model 2. Considering the fact that radiologist 13 is the base for the logistic model, radiologist 89 and 66 both increase the odds of recall compared to radiologist 13, while radiologists 95 and 34 both decrease the odds of recall compared to radiologist 13. Hence, observing the odds ratios of each radiologist, the ranking of radiologists from most clinically conservative to least clinically conservative is as follows: radiologist 89, radiologist 66, radiologist 13, radiologist 95, radiologist 34. 
+
+```{r setup 2.1.3, warning=FALSE, echo=FALSE}
+brca <- read.csv("https://raw.githubusercontent.com/jgscott/ECO395M/master/data/brca.csv")
+logit_brca_rd1 = glm(recall ~ age + history + symptoms + menopause + density + radiologist,  
+                     data=brca,
+                     family ='binomial')
+tab_model(logit_brca_rd1, show.r2 = FALSE, show.obs = FALSE, title = "**Table 2.3 Odds Ratios of Model 2**")
+
+```
+
+To address the problem that radiologists do not see the same patients we used a counterfactual approach. We applied model 2 to compute the predicted probabilities for each radiologist. For a test set, we used the whole data set but for each prediction we transformed the first column to include only one radiologist per test set. In this way, each radiologist's average predicted probability was calculated using the same patients. To examine how conservative each radiologist is, we compared their average predicted probabilities.  
+
+Table 2.4 shows the average predicted probability of recalling a patient for each radiologist. 
+
+```{r setup 2.1.4, warning=FALSE, echo=FALSE}
+brca <- read.csv("https://raw.githubusercontent.com/jgscott/ECO395M/master/data/brca.csv")
+brca1=brca #keep the same patients data for all 5 tables 
+brca2=brca
+brca3=brca
+brca4=brca
+brca5=brca
+
+brca1$radiologist=ifelse(brca1$radiologist=="radiologist13", "radiologist13", "radiologist13") #assign radiologist13 to table 1; no change in patient data
+brca2$radiologist=ifelse(brca2$radiologist=="radiologist34", "radiologist34", "radiologist34") #assign radiologist34 to table 2 keeping the same patient data 
+brca3$radiologist=ifelse(brca3$radiologist=="radiologist66", "radiologist66", "radiologist66") #assign radiologist66 to table 3 keeping the same patient data 
+brca4$radiologist=ifelse(brca4$radiologist=="radiologist89", "radiologist89", "radiologist89") #assign radiologist89 to table 3 keeping the same patient data
+brca5$radiologist=ifelse(brca5$radiologist=="radiologist95", "radiologist95", "radiologist95") #assign radiologist95 to table 3 keeping the same patient data
+
+phatpred_logitBrca1 = predict(logit_brca2, brca1, type = 'response')
+
+phatpred_logitBrca2 = predict(logit_brca2, brca2, type = 'response')
+
+phatpred_logitBrca3 = predict(logit_brca2, brca3, type = 'response')
+
+phatpred_logitBrca4 = predict(logit_brca2, brca4, type = 'response')
+
+phatpred_logitBrca5 = predict(logit_brca2, brca5, type = 'response')
+
+MeanProbRadiologist2 = c("Radiologist 13" = mean(phatpred_logitBrca1), 
+                        "Radiologist 34" = mean(phatpred_logitBrca2), 
+                        "Radiologist 66" = mean(phatpred_logitBrca3), 
+                         "Radiologist 89" = mean(phatpred_logitBrca4), 
+                         "Radiologist 95" = mean(phatpred_logitBrca5))
+
+kable(MeanProbRadiologist2, col.names = c("Average Probability"), caption = "**Table 2.4 Average Probability per Radiologist**",  format_caption = c("italic", "underline")) %>%
+  kable_styling(bootstrap_options = "striped", full_width = F) #%>%
+  #footnote(symbol = "Table2.2") 
+```
+
+As revealed from Table 2.4, radiologist 89 can be regarded as the most clinically conservative out of all radiologists, very closely followed by 66, since both their average predicted probabilities are the highest. On the other hand, radiologist 34 is the least conservative with the lowest average predicted probability, giving risk factors constant. Therefore, if we compare radiologist 89 to radiologist 34, we can state that radiologist 89 has a lower threshold for wanting to double-check the patient's results compared to radiologist 34. These results confirm the conclusion from our first approach where we compared coefficients and odds.  
+
+To confirm the results above, we also computed false negative rates and false positive rates for each radiologist. If a radiologist has the lowest false negative, then he or she is more likely to recall the patients who have cancer so they can be treated as early as possible. On the other hand, if a radiologist has the lowest false positive rate then he or she is more likely to recall the patients who do not have cancer so they are not disturbed for no reason. 
+
+Below we list the confusion matrices for each radiologist. 
+
+```{r setup 2.1.5, warning=FALSE, echo=FALSE}
+brca <- read.csv("https://raw.githubusercontent.com/jgscott/ECO395M/master/data/brca.csv")
+Radiologist13 = xtabs(~cancer + recall, data=subset(brca, radiologist == 'radiologist13'))
+df = as.data.frame(Radiologist13)
+t1 = data.frame(yhat0 = c(df$Freq[1],df$Freq[2]),yhat1 = c(df$Freq[3],df$Freq[4]))
+row.names(t1) <- c("cancer = 0", "cancer = 1")
+kable(t1, caption = "**Confusion Matrix: Radiologist 13**",padding = 2, 
+      align = "c", col.names = c("recall = 0", "recall = 1")) %>%
+  kable_styling(full_width = F, position = "float_left")
+
+Radiologist34 = xtabs(~cancer + recall, data=subset(brca, radiologist == 'radiologist34'))
+df2 = as.data.frame(Radiologist34)
+t2 = data.frame(yhat0 = c(df2$Freq[1],df2$Freq[2]),yhat1 = c(df2$Freq[3],df2$Freq[4]))
+row.names(t2) <- c("cancer = 0", "cancer = 1")
+kable(t2, caption = "**Confusion Matrix: Radiologist 34**",padding = 2, 
+      align = "c", col.names = c("recall = 0", "recall = 1")) %>%
+  kable_styling(full_width = F, position = "right")
+
+Radiologist66 = xtabs(~cancer + recall, data=subset(brca, radiologist == 'radiologist66'))
+df3 = as.data.frame(Radiologist66)
+t3 = data.frame(yhat0 = c(df3$Freq[1],df3$Freq[2]),yhat1 = c(df3$Freq[3],df3$Freq[4]))
+row.names(t3) <- c("cancer = 0", "cancer = 1")
+kable(t3, caption = "**Confusion Matrix: Radiologist 66**",padding = 2, 
+      align = "c", col.names = c("recall = 0", "recall = 1")) %>%
+  kable_styling(full_width = F, position = "float_left")
+
+Radiologist89 = xtabs(~cancer + recall, data=subset(brca, radiologist == 'radiologist89'))
+df4 = as.data.frame(Radiologist89)
+t4 = data.frame(yhat0 = c(df4$Freq[1],df4$Freq[2]),yhat1 = c(df4$Freq[3],df4$Freq[4]))
+row.names(t4) <- c("cancer = 0", "cancer = 1")
+kable(t4, caption = "**Confusion Matrix: Radiologist 89**",padding = 2, 
+      align = "c", col.names = c("recall = 0", "recall = 1")) %>%
+  kable_styling(full_width = F, position = "right")
+
+Radiologist95 = xtabs(~cancer + recall, data=subset(brca, radiologist == 'radiologist95'))
+df5 = as.data.frame(Radiologist95)
+t5 = data.frame(yhat0 = c(df5$Freq[1],df5$Freq[2]),yhat1 = c(df5$Freq[3],df5$Freq[4]))
+row.names(t5) <- c("cancer = 0", "cancer = 1")
+kable(t5, caption = "**Confusion Matrix: Radiologist 95**",padding = 2, 
+      align = "c", col.names = c("recall = 0", "recall = 1")) %>%
+  kable_styling(full_width = F)
+
+```
+
+1. For radiologist 13, False Negative is 4/(4+8) = 0.5, False Positive is 25/(165+25) = 0.13.
+2. For radiologist 34, False Negative is 3/(3+4) = 0.43, False Positive is 13/(177+33) = 0.068.
+3. For radiologist 66, False Negative is 4/(4+4) = 0.5, False Positive is 33/(157+33) = 0.1737.
+4. For radiologist 89, False Negative is 2/(2+5) = 0.2857, False Positive is 33/(157+33) = 0.1737.
+5. For radiologist 95, False Negative is 2/(2+5) = 0.2857, False Positive is 22/(168+22) = 0.1158. 
+
+The false positive rates support the prediction probability of results made by both models. We stated that the most clinically conservative radiologist seems to be radiologist 89 and the second most clinically conservative - radiologist 66. The false positive rates for both radiologists confirm these results since their rates are the highest. Both radiologists 89 and 66 have wrongly  recalled patients most frequently because these radiologists are the two most conservative. Radiologist 34 has the smallest false positive rate since he/she can be considered as the radiologist who is most likely to not recall patients who do not end up having cancer. This result also supports the fact that radiologist 34 is the least conservative. 
+
+As for the False Negative results, the radiologists that are most likely to recall the patients that do end up having cancer are radiologists 89 and 95 because they have the lowest false negatives rates. 
+
+## Question 2: Does the data suggest that radiologists should be weighing some clinical risk factors more heavily than they currently are?
+
+For question 2, we have decided to use two ways to evaluate what cancer risk factors radiologists weigh more heavily. First, we approach the problem through comparison of deviances to measure the performance of the model in terms of the predicted probabilities. Second, we examine the coefficients of each risk factor separately to conclude if radiologists are putting enough weight on these factors when making a recall decision.  
+
+In the first approach, where we compute deviances, we are not using confusion matrices and related error rates. The reason is that error rates are looking at decisions of class labels as opposed to how well-calibrated predicted probabilities are to the actual outcomes. In making decisions, both costs and probabilities matter, as different kinds of errors may have different costs, especially if we are considering the costs related to cancer outcomes. Thus, we want to evaluate the probability of prediction models independently of the decisions that it makes about the class label.
+
+By calculating the likelihood of each model's predicted probabilities and then finding the deviance, we conclude whether radiologists should be weighting some clinical factors more heavily than they currently are. The decisions are based on the magnitude of the average deviance of each model. If a model has a smaller average deviance, it is performing better than a one with higher average deviance. Hence, the model with better(smaller) deviance accounts for some factor(s) that have not been accounted for in the model with higher deviance.
+
+We compared the following logistic models that regress cancer on risk factors. Model 1 is the baseline model that we compare all other models with: 
+
+**Model 1:** Cancer<sub>&beta;</sub> = &beta;<sub>1</sub> recall
+
+**Model 2:** Cancer<sub>&beta;</sub> = &beta;<sub>1</sub> recall + &beta;<sub>2</sub> menopause
+
+**Model 3:** Cancer<sub>&beta;</sub> = &beta;<sub>1</sub> recall + &beta;<sub>2</sub> density
+
+**Model 4:** Cancer<sub>&beta;</sub> = &beta;<sub>1</sub> recall + &beta;<sub>2</sub> history
+
+**Model 5:** Cancer<sub>&beta;</sub> = &beta;<sub>1</sub> recall + &beta;<sub>2</sub> symptoms
+
+**Model 6:** Cancer<sub>&beta;</sub> = &beta;<sub>1</sub> recall + &beta;<sub>2</sub> age
+
+**Model 7:** Cancer<sub>&beta;</sub> = &beta;<sub>1</sub> recall + &beta;<sub>2</sub> density + &beta;<sub>2</sub> symptoms
+
+**Model 8:** Cancer<sub>&beta;</sub> = &beta;<sub>1</sub> recall + &beta;<sub>2</sub> density + &beta;<sub>2</sub> symptoms + &beta;<sub>2</sub> menopause
+
+
+We simulated 100 regressions for each model, calculated the deviances for each model and then took average of these deviances to come up with an average deviance per model. The reason why we have included models 7 and 8 is because density, symptoms and menopause have the lowest average deviances compared to all other models except the baseline model, model 1 . Hence, we wanted to observe if the average deviances of models 7 and 8 will be lower than that of the baseline model. 
+
+Table 2.5 reveals the average deviance of each of the 10 models.
+
+```{r setup 2.1.6, warning=FALSE, echo=FALSE}
+brca <- read.csv("https://raw.githubusercontent.com/jgscott/ECO395M/master/data/brca.csv")
+dev_out = function(y, probhat) {
+  p0 = 1-probhat
+  phat = data.frame(P0 = p0, p1 = probhat)
+  rc_pairs = cbind(seq_along(y), y + 1)
+  -2*sum(log(phat[rc_pairs]))
+}
+
+
+CancerResponse3 = do(100)* {
+  n = nrow(brca)
+  ntrain = n*0.9
+  ntest = n - n*0.9
+  TrainSet = sample.int(n, ntrain, replace = FALSE)
+  TestSet = setdiff(1:n, TrainSet)
+  Brca_Train = brca[TrainSet,]
+  Brca_Test = brca[TestSet,]
+  
+  logit_cancer1 = glm(cancer ~ recall, data=Brca_Train, family ='binomial')
+  logit_cancer2 = glm(cancer ~ recall + menopause, data=Brca_Train, family ='binomial')
+  logit_cancer3 = glm(cancer ~ recall + density, data=Brca_Train, family ='binomial') 
+  logit_cancer4 = glm(cancer ~ recall + history, data=Brca_Train, family ='binomial')  
+  logit_cancer5 = glm(cancer ~ recall + symptoms,  data=Brca_Train, family ='binomial')
+  logit_cancer6 = glm(cancer ~ recall + age,  data=Brca_Train, family ='binomial')
+  logit_cancer7 = glm(cancer ~ recall + density + symptoms, data=Brca_Train, family ='binomial')  
+  logit_cancer8 = glm(cancer ~ recall + density + symptoms + menopause, data=Brca_Train, family ='binomial')  
+  
+  phatTest_logitcancer1 = predict(logit_cancer1, Brca_Test, type = 'response')
+  phatTest_logitcancer2 = predict(logit_cancer2, Brca_Test, type = 'response')
+  phatTest_logitcancer3 = predict(logit_cancer3, Brca_Test, type = 'response')
+  phatTest_logitcancer4 = predict(logit_cancer4, Brca_Test, type = 'response')
+  phatTest_logitcancer5 = predict(logit_cancer5, Brca_Test, type = 'response')
+  phatTest_logitcancer6 = predict(logit_cancer6, Brca_Test, type = 'response')
+  phatTest_logitcancer7 = predict(logit_cancer7, Brca_Test, type = 'response')
+  phatTest_logitcancer8 = predict(logit_cancer8, Brca_Test, type = 'response')  
+
+  yhatTest_logitcancer1 = ifelse(phatTest_logitcancer1 > 0.0374, 1, 0)
+  yhatTest_logitcancer2 = ifelse(phatTest_logitcancer2 > 0.0374, 1, 0)
+  yhatTest_logitcancer3 = ifelse(phatTest_logitcancer3 > 0.0374, 1, 0)
+  yhatTest_logitcancer4 = ifelse(phatTest_logitcancer4 > 0.0374, 1, 0)
+  yhatTest_logitcancer5 = ifelse(phatTest_logitcancer5 > 0.0374, 1, 0)
+  yhatTest_logitcancer6 = ifelse(phatTest_logitcancer6 > 0.0374, 1, 0)
+  yhatTest_logitcancer7 = ifelse(phatTest_logitcancer7 > 0.0374, 1, 0)
+  yhatTest_logitcancer8 = ifelse(phatTest_logitcancer8 > 0.0374, 1, 0)
+ 
+  c(devBaseline=dev_out(Brca_Test$cancer, phatTest_logitcancer1),
+    devMenop=dev_out(Brca_Test$cancer, phatTest_logitcancer2),
+    devDensity=dev_out(Brca_Test$cancer, phatTest_logitcancer3),
+    devHist=dev_out(Brca_Test$cancer, phatTest_logitcancer4),
+    devSympt=dev_out(Brca_Test$cancer, phatTest_logitcancer5),
+    devAge=dev_out(Brca_Test$cancer, phatTest_logitcancer6),
+    devDS=dev_out(Brca_Test$cancer, phatTest_logitcancer7),
+    devDSM=dev_out(Brca_Test$cancer, phatTest_logitcancer8))
+ 
+}
+
+MeanDev = data.table::data.table("Deviance: Baseline"=mean(CancerResponse3$devBaseline), 
+               "Deviance: Menopause"=mean(CancerResponse3$devMenop), 
+               "Deviance: Density"=mean(CancerResponse3$devDensity),
+               "Deviance: History"=mean(CancerResponse3$devHist),
+               "Deviance: Symptoms"=mean(CancerResponse3$devSympt),
+               "Deviance: Age"=mean(CancerResponse3$devAge),
+               "Deviance: Density&Symptoms"=mean(CancerResponse3$devDS), 
+               "Deviance: Density, Symptoms & Menopause"=mean(CancerResponse3$devDSM))
+
+DevMeans_transpose <- t(MeanDev)
+
+kable(DevMeans_transpose[1:8,], col.names = c("Average Deviance"), caption = "**Table 2.5 Average Deviance per Model**",  format_caption = c("italic", "underline")) %>%
+  kable_styling(bootstrap_options = "striped", full_width = F) #%>%
+  #footnote(symbol = "Table2.3") 
+```
+
+We consider the first model, where we are regressing cancer on recall, as the baseline model. If the radiologists have been weighing risk factors flawlessly, the baseline model would have the lowest deviance, as they take into account all the risk factors when making decisions to recall the patients. By comparing the baseline model with all the models that have only one more variable added to the recall variable (models 2, 3, 4, 5, 6), we find that the lowest average deviance has model 1, the baseline model, as shown in Table 2.5. This result indicates that radiologists are considering strongly enough all the risk factors when making a recall decision. 
+
+Lastly, in the second approach, we compare the coefficients of models 2, 3, 4, 5, and 6 to see if they are high enough. If a coefficient has a significant effect on the odds of having a cancer, then the radiologist may not be considering that risk factor as strongly in making his or her recall decision. 
+
+The following table shows the coefficients of each of the models that consist of one other variable except the recall. 
+
+```{r setup 2.1.7, warning=FALSE, echo=FALSE}
+brca <- read.csv("https://raw.githubusercontent.com/jgscott/ECO395M/master/data/brca.csv")
+logit_cancer1 = glm(cancer ~ recall, data=brca, family ='binomial')
+logit_cancer2 = glm(cancer ~ recall + menopause, data=brca, family ='binomial')
+logit_cancer3 = glm(cancer ~ recall + density, data=brca, family ='binomial') 
+logit_cancer4 = glm(cancer ~ recall + history, data=brca, family ='binomial')  
+logit_cancer5 = glm(cancer ~ recall + symptoms,  data=brca, family ='binomial')
+logit_cancer6 = glm(cancer ~ recall + age,  data=brca, family ='binomial')
+
+tab_model(logit_cancer1, logit_cancer2, logit_cancer3, logit_cancer4, logit_cancer5, logit_cancer6, 
+          transform = NULL, dv.labels = c("Model 1", "Model 2", "Model 3", "Model 4", "Model 5", "Model 6"), 
+          show.ci=FALSE, show.p = FALSE, show.r2 = FALSE, show.obs = FALSE, string.est = "Coefficients", title = "**Table 2.6 Coefficients of Models** ")
+```
+
+As seen from the table above, the highest coefficients are for density, age and menopause. Looking at model 3, the patients with a risk factor of density [4] (extremely danse) have exp(1.62) ~ 5.05 times the odds of having cancer as patients with density 1, even holding recall status constant. Hence, we can conclude that radiologists may not be weighting as much importance to density (or more accurately, density [4]) as they should be when interpreting the mammogram and deciding whether to recall the patient. Considering models 6 and 2, patients older than 70 have exp(0.92) ~ 2.51 times the odds of having cancer as patients younger than 50, holding recall status constant. Also, if the patient has been observed to have a postmenounknown menopause risk factor, then she has exp(0.77) ~ 2.51 times the odds of having cancer compared to a patient with post menopause $HT, holding recall constant. All 3 of these coefficients significantly influence the odds of having a cancer, especially the density [4] coefficient. Therefore, radiologists should be suggested to weigh density, age, and menopause (or more accurately, density [4], age above 70, and unknown menopause) more heavily than they currently are. 
+
+Regressing cancer on these 3 variables: density, age and menopause together, increases the coefficients for density and age even more as revealed in the table below. The table 2.7 displays the coefficients of the logistic model 7. 
+
+**Model 7:** Cancer<sub>&beta;</sub> = &beta;<sub>1</sub> recall + &beta;<sub>2</sub> density + &beta;<sub>2</sub> age + &beta;<sub>2</sub> menopause
+
+```{r setup 2.1.8, warning=FALSE, echo=FALSE}
+brca <- read.csv("https://raw.githubusercontent.com/jgscott/ECO395M/master/data/brca.csv")
+logit_cancer7 = glm(cancer ~ recall + density + age + menopause, data=brca, family ='binomial')
+
+tab_model(logit_cancer7, transform = NULL, dv.labels = c("Model 7"), 
+          show.ci=FALSE, show.p = FALSE, show.r2 = FALSE, show.obs = FALSE, string.est = "Coefficients", title="**Table 2.7 Coefficients of Model 7**")
+```
+
+The two approaches lead us to slightly different conclusions. First, the comparison of each model's average deviance revealed that the baseline model (cancer regressed only on recall) has the lowest deviance on average; hence, radiologists are already weighing sufficient importance on all risk factors. However, the comparison of each risk factor's coefficient showed us that radiologist should actually weigh density, age and menopause stronger than they currently are in making recall decisions. 
+
+Since the deviance measure can be considered more unstable than examining the coefficients, we will lean on the results from approach 2 and conclude that radiologists should be placing more importance on density, age and menopause when making a recall decision. 
+
+
+
+# Problem 3: Predicting when articles go viral
+In this exercise we are interested in building a model to predict whether articles published by Mashable will be viral or not based on the cutoff of 1400 shares. In addition, the article-level features are explored in order to know how to improve an article's chance of being viral.
+
+### Approach specification
+
+In building a predictive model for Mashable's articles, two different approaches have been used.The first approach does linear regression first and then chooses a threshold based on the prediction of the linear model to get the predicted binary dependent variable. The second approach chooses a threshold first to get a binary dependent variable and then uses classification models (logistic model and KNN) to regress that binary variable on feature variables.
+
+## First Approach: Regress first and threshold second   
+First, we fit various linear regression models to predict the number of shares of Mashable's articles that included all the article features as predictors, except those that were likely to be perfectly collinear with each other. At the next stage, all the predicted shares above 1400 were assigned 1,while all the other predicted shares were assigned 0. 
+
+Besides, since about 51 percent articles in the raw data were not viral, the model which always predicted "not viral" was chosen as a baseline model. Afterwards, out-of-sample performances of our predictive models were evaluated compared to the out-of-sample performance of the baseline model. 
+
+
+```{r model2.3.1-lm, echo = FALSE, warning=FALSE}
+online_news <- read.csv("https://raw.githubusercontent.com/jgscott/ECO395M/master/data/online_news.csv")
+online_news$viral = ifelse(online_news$shares > 1400, 1, 0)
+online_news$log_shares = log(online_news$shares)
+online_news$num_other_hrefs = online_news$num_hrefs - online_news$num_self_hrefs
+LinearViral = do(100)* {
+  n = nrow(online_news)
+  ntrain = n*0.8
+  ntest = n - n*0.8
+  TrainSet = sample.int(n, ntrain, replace = FALSE)
+  TestSet = setdiff(1:n, TrainSet)
+  Online_news_Train = online_news[TrainSet,]
+  Online_news_Test = online_news[TestSet,]
+
+  
+LM_News_all_int = lm(log_shares ~ n_tokens_title + n_tokens_content + num_other_hrefs + num_self_hrefs + num_imgs 
+                                    + num_videos + average_token_length + num_keywords  + data_channel_is_lifestyle 
+                                    + data_channel_is_entertainment + data_channel_is_bus + data_channel_is_socmed 
+                                    + data_channel_is_tech +  self_reference_avg_sharess + weekday_is_monday 
+                                    + weekday_is_tuesday + weekday_is_wednesday + weekday_is_thursday + weekday_is_friday +
+                                      + weekday_is_saturday + global_rate_positive_words 
+                                    + global_rate_negative_words + avg_positive_polarity  + avg_negative_polarity + title_subjectivity + title_sentiment_polarity, data=Online_news_Train)
+  
+  Null_model_Train = nrow(filter(Online_news_Train, shares>1400))/nrow(Online_news_Train)
+  
+  share_prediction_testAll_int = exp(predict(LM_News_all_int, Online_news_Test))
+  
+ yhat_testAll_int = ifelse(share_prediction_testAll_int>1400, yes = 1, no = 0)
+  
+ confusion_out_lmAll_int = table(y=Online_news_Test$viral, yhat=yhat_testAll_int)
+  
+  
+ c(
+ ErrorRate_All_int = 1-sum(diag(confusion_out_lmAll_int))/sum(confusion_out_lmAll_int),
+ 
+ Error_rate_Null = nrow(filter(Online_news_Test, shares>1400))/nrow(Online_news_Test),
+ 
+ TPR_All_int = confusion_out_lmAll_int[2,2]/sum(confusion_out_lmAll_int[2, ]),
+ FPR_All_int = confusion_out_lmAll_int[1,2]/sum(confusion_out_lmAll_int[1, ]))
+}
+
+NewserrortableLM=data.frame("Error rate of Linear Model" = round(mean(LinearViral$ErrorRate_All_int), 4),
+                          "Error rate of Null Model" = round(mean(LinearViral$Error_rate_Null),4),
+                          
+                          "TPR of Linear Model" = round(mean(LinearViral$TPR_All_int),4),
+                        
+                          "FPR of Linear Model" = round(mean(LinearViral$FPR_All_int),4))
+                
+```
+
+The averaged overall error rate, true positive rate and false positive rate across 100 train/test splits together with a confusion matrix are shown in the table 3.1. For the error rate, we listed for both linear model and baseline model to see how much our linear model made an improvement. To see among true viral articles, how many were correctly predicted as "viral", we calculated true positive rate of the linear model. To see among true non-viral articles, how many were wrongly predicted as "viral", we calculated false positive rate of the linear model. 
+
+```{r table2.3.1_Rates, echo = FALSE, warning=FALSE}
+online_news <- read.csv("https://raw.githubusercontent.com/jgscott/ECO395M/master/data/online_news.csv")
+online_news$viral = ifelse(online_news$shares > 1400, 1, 0)
+online_news$log_shares = log(online_news$shares)
+online_news$num_other_hrefs = online_news$num_hrefs - online_news$num_self_hrefs
+library(data.table)
+rates_transpose <- t(NewserrortableLM)
+kable(rates_transpose, rates_transpose = c("Error rate of Linear Model", "Error Rate of Null Model","True Positive Rate of Linear Model", "False Positive Rate of Linear Model"), 
+caption = "**Table 3.1 The Performance of The Linear Model") 
+```
+
+```{r table2.3.2_Conf.Matrix, echo = FALSE, warning=FALSE}
+online_news <- read.csv("https://raw.githubusercontent.com/jgscott/ECO395M/master/data/online_news.csv")
+online_news$viral = ifelse(online_news$shares > 1400, 1, 0)
+online_news$log_shares = log(online_news$shares)
+online_news$num_other_hrefs = online_news$num_hrefs - online_news$num_self_hrefs
+t = xtabs(~Online_news_Test$viral+yhat_testAll_int)
+df = as.data.frame(t)
+t = data.frame(yhat0 = c(df$Freq[1],df$Freq[2]),yhat1 = c(df$Freq[3],df$Freq[4]))
+row.names(t) <- c("True viral status No", "True viral status Yes")
+kable(t, padding = 2, align = "c", col.names = c("Predicted viral status No", "Predicted viral status Yes"), caption = "**Table 3.2. Confusion Matrix For The Linear Model**")
+  
+```
+
+Overall error rate of the linear model is 44%, with an absolute improvement of 5% over the null model's error rate. On average, its true positive rate is about 90% and its false positive rate is about 78%.
+
+In addition to the linear regression model,  KNN regression model was also performed to predict the viral status of articles using the same approach of regressing first and thresholding next. From the table 3.3 it can be seen that KNN model has very similar results to the linear regression model, except that the optimal value of K for true positive rate is different from values for error rate and false positive rate. Thus, KNN is more sensitive to the choosing of a specific K. 
+
+```{r model2.3.1-knn, echo = FALSE, warning=FALSE}
+online_news <- read.csv("https://raw.githubusercontent.com/jgscott/ECO395M/master/data/online_news.csv")
+online_news$viral = ifelse(online_news$shares > 1400, 1, 0)
+online_news$log_shares = log(online_news$shares)
+online_news$num_other_hrefs = online_news$num_hrefs - online_news$num_self_hrefs
+
+#use KNN method to do prediction
+knn_result=data.frame(k=c(), ErrorRate=c(), TPR=c(), FPR=c())
+k_grid = seq(3, 99, by=2)
+LoopKNN = foreach(k=k_grid, .combine='c') %do% {
+  out = do(1)*{
+    n = nrow(online_news)
+    ntrain = n*0.8
+    ntest = n - n*0.8
+    TrainSet = sample.int(n, ntrain, replace = FALSE)
+    TestSet = setdiff(1:n, TrainSet)
+    news_train = online_news[TrainSet,]
+    news_test = online_news[TestSet,]
+    
+    Xtrain = model.matrix(~.- (url+ shares + log_shares + viral) - 1,data=news_train)
+    Xtest = model.matrix(~.- (url+ shares + log_shares + viral) - 1,data=news_test)
+    Ytrain = news_train$shares
+    Ytest = news_test$shares
+    
+    scales = apply(Xtrain, 2, sd)
+    Xtrain_scaled = scale(Xtrain, scale=scales)
+    Xtest_scaled = scale(Xtest, scale=scales)
+    
+    knnPred = knn.reg(Xtrain_scaled, Xtest_scaled, Ytrain, k=k)
+    yhat_knnPred=ifelse(knnPred$pred>1400, 1, 0)
+    confusion_out_knn=table(y=news_test$viral, yhat=yhat_knnPred)
+    
+    c(ErrorRate_knn=1-sum(diag(confusion_out_knn)/sum(confusion_out_knn)),
+      TPR_knn= confusion_out_knn[2,2]/sum(confusion_out_knn[2, ]),
+      FPR_knn= confusion_out_knn[1,2]/sum(confusion_out_knn[1, ]))
+    
+  }
+  knn_result=rbind(knn_result,c(k, mean(out$ErrorRate_knn), mean(out$TPR_knn), mean(out$FPR_knn)))
+}
+colnames(knn_result)=c("K", "Mean_ErrorRate", "Mean_TPR", "Mean_FPR")
+
+Min_ErrorRate1= data.table::data.table("Min ErrorRate"=round(min(knn_result$`Mean_ErrorRate`),4), 
+                                    "K"=knn_result$`K`[knn_result$`Mean_ErrorRate`==min(knn_result$`Mean_ErrorRate`)])
+Max_TPR1= data.table::data.table("Max True Positive Rate"=round(max(knn_result$`Mean_TPR`),4), 
+                                      "K"=knn_result$`K`[knn_result$`Mean_TPR`==max(knn_result$`Mean_TPR`)])
+Min_FPR1= data.table::data.table("Min False Positive Rate"=round(min(knn_result$`Mean_FPR`),4), 
+                                      "K"=knn_result$`K`[knn_result$`Mean_FPR`==min(knn_result$`Mean_FPR`)])
+
+TableKNN1 = data.table::data.table("Model Performance Measures" = c("Min ErrorRate", "Max True Positive Rate",
+                                                        "Min False Positive Rate"), "Rate" = c(min(knn_result$`Mean_ErrorRate`),
+                                                                                                   max(knn_result$`Mean_TPR`), 
+                                                                                                   min(knn_result$`Mean_FPR`)),
+                                                          "K" = c(knn_result$`K`[knn_result$`Mean_ErrorRate`==min(knn_result$`Mean_ErrorRate`)],
+                                                                  knn_result$`K`[knn_result$`Mean_TPR`==max(knn_result$`Mean_TPR`)],
+                                                                  knn_result$`K`[knn_result$`Mean_FPR`==min(knn_result$`Mean_FPR`)]))
+
+kable(TableKNN1, caption = "**Table 3.3 Performance of The KNN Model**")
+
+```
+
+
+## Second Approach: Threshold first and classify second
+
+Second approach of building predictive model comes from the standpoint of classification. A new binary variable for article being viral is defined. We fited a logistic regression that included all the article features as predictors to directly predict the viral status as a target variable. The model which always predicted "not viral" was chosen as a baseline model.
+
+```{r model2.3.2-glm, echo = FALSE, warning=FALSE}  
+online_news <- read.csv("https://raw.githubusercontent.com/jgscott/ECO395M/master/data/online_news.csv")
+online_news$viral = ifelse(online_news$shares > 1400, 1, 0)
+online_news$log_shares = log(online_news$shares)
+online_news$num_other_hrefs = online_news$num_hrefs - online_news$num_self_hrefs
+LogitViral = do(100)* {
+  n = nrow(online_news)
+  ntrain = n*0.8
+  ntest = n - n*0.8
+  TrainSet = sample.int(n, ntrain, replace = FALSE)
+  TestSet = setdiff(1:n, TrainSet)
+  Online_news_Train = online_news[TrainSet,]
+  Online_news_Test = online_news[TestSet,]
+  
+    Logit_News_all_int = glm(viral ~ n_tokens_title + n_tokens_content + num_other_hrefs + num_self_hrefs + num_imgs 
+                                    + num_videos + average_token_length + num_keywords  + data_channel_is_lifestyle 
+                                    + data_channel_is_entertainment + data_channel_is_bus + data_channel_is_socmed 
+                                    + data_channel_is_tech +  self_reference_avg_sharess + weekday_is_monday 
+                                    + weekday_is_tuesday + weekday_is_wednesday + weekday_is_thursday + weekday_is_friday +
+                                      + weekday_is_saturday + global_rate_positive_words 
+                                    + global_rate_negative_words + avg_positive_polarity  + avg_negative_polarity + title_subjectivity + title_sentiment_polarity, data=Online_news_Train, family ='binomial')
+  
+   
+  
+  Null_model_Train = nrow(filter(Online_news_Train, shares>1400))/nrow(Online_news_Train)
+  phat_logit_testAll_int = predict(Logit_News_all_int, Online_news_Test, type = 'response')
+  yhatTest_logit_NewsAll_int = ifelse(phat_logit_testAll_int > 0.5, 1, 0)
+  confusion_out_logitAll_int=table(y=Online_news_Test$viral, yhat=yhatTest_logit_NewsAll_int)  
+  
+  c(
+    ErrorRate_All_int = 1-sum(diag(confusion_out_logitAll_int))/sum(confusion_out_logitAll_int),
+    Error_rate_Null = nrow(filter(Online_news_Test, shares>1400))/nrow(Online_news_Test),
+
+   TPR_All_int = confusion_out_logitAll_int[2,2]/sum(confusion_out_logitAll_int[2, ]),
+    
+    FPR_All_int = confusion_out_logitAll_int[1,2]/sum(confusion_out_logitAll_int[1, ]))
+}
+
+NewsErrorTRP_FRPtableLogit=data.frame("Error Rate of Logit Model" = round(mean(LogitViral$ErrorRate_All_int),4),
+                                      "Error Rate of Null Model" = round(mean(LogitViral$Error_rate_Null),4),
+                           "TPR of Logit Model" = round(mean(LogitViral$TPR_All_int),4),
+                           "FPR of Logit Model" = round(mean(LogitViral$FPR_All_int),4))
+```
+
+The averaged overall error rate, true positive rate and false positive rate together with a confusion matrix are shown in the table 3.4 . 
+
+```{r table2.3.3_Rates, echo = FALSE, warning=FALSE}
+online_news <- read.csv("https://raw.githubusercontent.com/jgscott/ECO395M/master/data/online_news.csv")
+online_news$viral = ifelse(online_news$shares > 1400, 1, 0)
+online_news$log_shares = log(online_news$shares)
+online_news$num_other_hrefs = online_news$num_hrefs - online_news$num_self_hrefs
+rates_transpose_glm <- t(NewsErrorTRP_FRPtableLogit)
+kable(rates_transpose_glm, rates_transpose_glm = c("Error rate of Logistic Model", "Error Rate of Null Model","True Positive Rate of Logistic Model", "False Positive Rate of Logistic Model"), caption = "**Table 3.4 The Performance of Logistic Model**") 
+```
+
+```{r table2.3.4_Conf.matrix, echo = FALSE, warning=FALSE}
+online_news <- read.csv("https://raw.githubusercontent.com/jgscott/ECO395M/master/data/online_news.csv")
+online_news$viral = ifelse(online_news$shares > 1400, 1, 0)
+online_news$log_shares = log(online_news$shares)
+online_news$num_other_hrefs = online_news$num_hrefs - online_news$num_self_hrefs
+t = xtabs(~Online_news_Test$viral+yhatTest_logit_NewsAll_int)
+df = as.data.frame(t)
+t = data.frame(yhat0 = c(df$Freq[1],df$Freq[2]),yhat1 = c(df$Freq[3],df$Freq[4]))
+row.names(t) <- c("True viral status No", "True viral status Yes")
+kable(t, padding = 2, align = "c", col.names = c("Predicted viral status No", "Predicted viral status Yes"), caption = "**Table 3.5 Confusion Matrix For The Logistic Model**")
+  
+```
+
+Overall error rate of the logistic model is 39%, with an absolute improvement of 10% over the null model's error rate. On average, its true positive rate is about 57% and its false positive rate is about 37%.
+
+KNN regression model for classification yielded slightly better results of error rate and false positive rate than the logistic regression model. But again, the optimal K values of different measures were unstable.
+
+```{r model2.3.2-knn, echo = FALSE, warning=FALSE}
+online_news <- read.csv("https://raw.githubusercontent.com/jgscott/ECO395M/master/data/online_news.csv")
+online_news$viral = ifelse(online_news$shares > 1400, 1, 0)
+online_news$log_shares = log(online_news$shares)
+online_news$num_other_hrefs = online_news$num_hrefs - online_news$num_self_hrefs
+
+knn_result2=data.frame(k=c(), ErrorRate=c(), TPR=c(), FPR=c())
+k_grid = seq(3, 99, by=2)
+LoopKNN = foreach(k=k_grid, .combine='c') %do% {
+  out = do(1)*{
+    n = nrow(online_news)
+    ntrain = n*0.8
+    ntest = n - n*0.8
+    TrainSet = sample.int(n, ntrain, replace = FALSE)
+    TestSet = setdiff(1:n, TrainSet)
+    news_train = online_news[TrainSet,]
+    news_test = online_news[TestSet,]
+    
+    Xtrain = model.matrix(~.- (url+ shares + log_shares + viral) - 1,data=news_train)
+    Xtest = model.matrix(~.- (url+ shares + log_shares + viral) - 1,data=news_test)
+    Ytrain = news_train$viral
+    Ytest = news_test$viral
+    
+    scales = apply(Xtrain, 2, sd)
+    Xtrain_scaled = scale(Xtrain, scale=scales)
+    Xtest_scaled = scale(Xtest, scale=scales)
+    
+    knnPred_class = class:: knn(Xtrain_scaled, Xtest_scaled, Ytrain, k=25)
+    confusion_out_knnClass=table(y=news_test$viral, yhat=knnPred_class)
+    
+    c(ErrorRate_knnClass=1-sum(diag(confusion_out_knnClass)/sum(confusion_out_knnClass)),
+      TPR_knnClass= confusion_out_knnClass[2,2]/sum(confusion_out_knnClass[2, ]),
+      FPR_knnClass= confusion_out_knnClass[1,2]/sum(confusion_out_knnClass[1, ]))
+    
+  }
+  knn_result2=rbind(knn_result2,c(k, mean(out$ErrorRate_knnClass), mean(out$TPR_knnClass), mean(out$FPR_knnClass)))
+}
+colnames(knn_result2)=c("K", "Mean_ErrorRate", "Mean_TPR", "Mean_FPR")
+
+Min_ErrorRate= data.table::data.table("Min ErrorRate"=round(min(knn_result2$`Mean_ErrorRate`),4),
+                                      "K"=knn_result2$`K`[knn_result2$`Mean_ErrorRate`==min(knn_result2$`Mean_ErrorRate`)])
+Max_TPR= data.table::data.table("Max True Positive Rate"=round(max(knn_result2$`Mean_TPR`),4), 
+                                "K"=knn_result2$`K`[knn_result2$`Mean_TPR`==max(knn_result2$`Mean_TPR`)])
+Min_FPR= data.table::data.table("Min False Positive Rate"=round(min(knn_result2$`Mean_FPR`),4), 
+                                "K"=knn_result2$`K`[knn_result2$`Mean_FPR`==min(knn_result2$`Mean_FPR`)])
+c=rbind(Min_ErrorRate)
+
+TableKNN2 = data.table::data.table("Model Performance Measures" = c("Min ErrorRate", "Max True Positive Rate",
+                                                        "Min False Positive Rate"), "Rate" = c(min(knn_result2$`Mean_ErrorRate`),
+                                                                                                   max(knn_result2$`Mean_TPR`), 
+                                                                                                   min(knn_result2$`Mean_FPR`)),
+                                                          "K" = c(knn_result2$`K`[knn_result$`Mean_ErrorRate`==min(knn_result$`Mean_ErrorRate`)],
+                                                                  knn_result2$`K`[knn_result$`Mean_TPR`==max(knn_result$`Mean_TPR`)],
+                                                                  knn_result2$`K`[knn_result$`Mean_FPR`==min(knn_result$`Mean_FPR`)]))
+
+kable(TableKNN2, caption = "**Table 3.6 Performance of KNN Model**")
+
+
+```
+
+
+### Conclusion
+
+```{r table2.3.5_LMvsGLM, echo = FALSE, warning=FALSE}
+online_news <- read.csv("https://raw.githubusercontent.com/jgscott/ECO395M/master/data/online_news.csv")
+online_news$viral = ifelse(online_news$shares > 1400, 1, 0)
+online_news$log_shares = log(online_news$shares)
+online_news$num_other_hrefs = online_news$num_hrefs - online_news$num_self_hrefs
+
+NewsErrorTRP_FRPtableLogit1 = data.table::data.table("Performance Measures" = c("Error rate of Model", "Error rate of Null model", "TPR", "FPR"),
+"Logit Model(Approach 2): Average Performance Measures" = c(round(mean(LogitViral$ErrorRate_All_int),4),
+                                                                                  round(mean(LogitViral$Error_rate_Null),4),
+                                                                                        round(mean(LogitViral$TPR_All_int),4),
+                                                                                        round(mean(LogitViral$FPR_All_int),4)))
+                                                                                        
+NewsErrorTRP_FRPtableLinear2 = data.table::data.table("Performance Measures" = c("Error rate of Model",
+                                                                                 "Error rate of Null model",
+                                                                                 "TPR",
+                                                                                 "FPR"),
+                                                      "Linear Model(Approach 1): Average Performance Measures" = c(round(mean(LinearViral$ErrorRate_All_int),4),
+round(mean(LinearViral$Error_rate_Null),4),
+                                                                                         round(mean(LinearViral$TPR_All_int),4),
+                                                                                          round(mean(LinearViral$FPR_All_int),4)))
+MergedTable = inner_join(NewsErrorTRP_FRPtableLogit1, NewsErrorTRP_FRPtableLinear2, by="Performance Measures")
+
+kable(MergedTable, MergedTable = c("Error rate of Linear Model", "Error Rate of Null Model","True Positive Rate of Linear Model", "False Positive Rate of Linear Model", "Error rate of Logistic Model", "Error Rate of Null Model","True Positive Rate of Logistic Model", "False Positive Rate of Logistic Model"),
+caption = "**Table 3.7 Comparison Between Two Approaches**")
+```
+
+Table 3.7 shows the comparison of two approaches based on their performance evaluation. If we evaluate the two approaches based on their error rates, it can be concluded that the second approach of thresholding the shares of articles first and then using classification as a second step performed better than the first approach, with an absolute improvement of about 6% in error rate. In addition, the classification method also gave a lower false positive rate. However, obtained improvements in the error rate and false positive rate of the classification model came in the expense of its relatively lower true positive rate. But in general, the second approach performed better than the first approach.  
+
+Why could classification generally outperform linear regression in this case? Firstly, what we want to predict is a binary variable having values 1 or 0. But linear regression model usually performs better in predicting continuous variables than discrete variables. Secondly, it potentially has more room for errors that come from choosing the threshold for the followed discretization. Categorization or discretization assumes that the relationship between the predictor and the response is flat within intervals and the threshold is very likely to be estimated with sampling error. Moreover, the errors we get from the first stage of doing linear regression might be magnified in the second stage when choosing the threshold. But there is no error that is probably magnified in the later logistic regression when choosing a desired threshold in the raw data at first. That explains why the linear regression has higher error rates and false positive rates than logistic regression.
+
+Conversely, logistic regression performs better on classification problems due to the fact that they are constructed to predict conditional probabilities where the binary outcomes are in the discrete form. Unlike linear regression, logistic regression can directly predict probabilities (values that are restricted to the (0,1) interval). Those probabilities are well-calibrated when compared to the linear regression.
+
+**Extra Question: How to improve an article's chance to become viral?**
+
+```{r table2.3.6_recommendations, echo = FALSE, warning=FALSE, results='asis'}
+online_news <- read.csv("https://raw.githubusercontent.com/jgscott/ECO395M/master/data/online_news.csv")
+online_news$viral = ifelse(online_news$shares > 1400, 1, 0)
+online_news$log_shares = log(online_news$shares)
+online_news$num_other_hrefs = online_news$num_hrefs - online_news$num_self_hrefs
+Logit_News_all_int = glm(viral ~ n_tokens_title + n_tokens_content + num_other_hrefs + num_self_hrefs + num_imgs 
+                                    + num_videos + average_token_length + num_keywords  + data_channel_is_lifestyle 
+                                    + data_channel_is_entertainment + data_channel_is_bus + data_channel_is_socmed 
+                                    + data_channel_is_tech +  self_reference_avg_sharess + weekday_is_monday 
+                                    + weekday_is_tuesday + weekday_is_wednesday + weekday_is_thursday + weekday_is_friday +
+                                      + weekday_is_saturday + global_rate_positive_words 
+                                    + global_rate_negative_words + avg_positive_polarity  + avg_negative_polarity + title_subjectivity + title_sentiment_polarity, data=Online_news_Train, family ='binomial')
+
+tab_model(Logit_News_all_int, transform = NULL, show.ci=FALSE, show.r2 = FALSE, show.obs = FALSE, string.est = "Coefficients", title="**Table 3.8 Coefficients of the Logistic Model**")
+
+```
+
+Table 3.8 shows the coefficients and their significance levels of the logistic regression model above can be used to know how to improve the Mashable articles chance of getting viral.  
+Based on the logistic model's coefficients, it can be recommended to Mashable writers to increase the rate of positive words in the content, focus more on data channels like "Social Media" and "Tech" and try to avoid publishing on weekdays as the model predicts lower chance of getting viral for the articles published on weekdays. 
