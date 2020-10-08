@@ -1,6 +1,6 @@
 ---
 title: "Using Statistical Learning Models to Predict Listed Prices of Used Cars"
-author: "Eliza Malinova,  Zhenghao Li, and Raushan Baizakova"
+author: "Eliza Malinova"
 output: pdf_document
 ---
 
