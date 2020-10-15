@@ -1,0 +1,114 @@
+library(data.table)
+library(tidyverse)
+library(kableExtra)
+library(knitr)
+library(timeSeries)
+library("fUnitRoots")
+library(forecast)
+library(plyr)
+library(XLConnect)
+options(scipen=999)
+
+
+#ARIMA Model 
+
+SpotCrudeOil_WTI <- fread("SpotCrudeOilWTI_Y.csv")
+names(SpotCrudeOil_WTI)[1:2] <- c("Date", "WTIPrice")
+
+SpotCrudeOil_WTI$Year <- substr(SpotCrudeOil_WTI$Date, 1,4)
+
+SpotCrudeOil_WTI$Year <- as.numeric(SpotCrudeOil_WTI$Year)
+
+SpotCrudeOil_WTI$DateFact <- as.factor(SpotCrudeOil_WTI$Date)
+
+plot(SpotCrudeOil_WTI$DateFact,SpotCrudeOil_WTI$WTIPrice,xlab='Date',ylab='Price',main='WTI crude oil spot price')
+
+diff(SpotCrudeOil_WTI$WTIPrice,differences = 1)
+
+train_wti = SpotCrudeOil_WTI[SpotCrudeOil_WTI$Year < 2019,]
+
+test_wti = SpotCrudeOil_WTI[SpotCrudeOil_WTI$Year >= 2019,]
+
+
+train_wti$Log_WTIPrice <- log(train_wti$WTIPrice)
+
+TSData = ts(train_wti, start = c(1986,1), frequency = 12)
+components.ts = decompose(TSData)
+plot(components.ts)
+
+acf(train_wti$WTIPrice, drop.lag.0=FALSE) 
+acf(train_wti$WTIPrice)
+
+pacf(train_wti$Log_WTIPrice, drop.lag.0=FALSE)
+pacf(train_wti$Log_WTIPrice)
+
+
+plot(train_wti$WTIPrice,type='l',ylab='wti price')
+
+plot(train_wti$Log_WTIPrice,type='l',ylab='log(WTIPrice)')
+
+#so we use log but take difference because there is still some trend
+
+plot(diff(train_wti$Log_WTIPrice,differences = 1), type='l',ylab='difference of log(WTIPrice)')
+
+logPrice <- diff(train_wti$Log_WTIPrice,differences = 1)
+
+bestParameters <- auto.arima(logPrice, trace=TRUE, test="kpss", ic="bic")
+
+############################################################
+
+Parameters <- auto.arima(log(train_wti$WTIPrice), trace=TRUE, test="kpss", ic="bic")
+
+sarima=arima(log(train_wti$WTIPrice),order=c(2,1,2),seasonal=list(order=c(1,0,1),period=12))
+
+sarima2=arima(log(train_wti$WTIPrice),order=c(1,1,0),seasonal=list(order=c(1,0,1),period=12))
+
+fit1 <- Arima(log(train_wti$WTIPrice), model=sarima)
+onestep <- forecast(fit1)
+accuracy(fit1)
+
+fit2 <- Arima(log(test_wti$WTIPrice), model=sarima)
+onestep2 <- forecast(fit2)
+accuracy(fit2)
+
+fit3 <- Arima(log(train_wti$WTIPrice), model=sarima2)
+onestep <- forecast(fit3)
+accuracy(fit3)
+
+fit4 <- Arima(log(test_wti$WTIPrice), model=sarima2)
+onestep2 <- forecast(fit4)
+accuracy(fit4)
+
+
+ggplot() +
+  geom_line(
+    aes(
+      x = as.numeric(time(onestep2$fitted)),
+      y = as.numeric(exp(onestep2$fitted))
+    ),
+    col = "black"
+  ) +
+  geom_line(
+    aes(
+      x = as.numeric(time(test_wti$WTIPrice)),
+      y = as.numeric(test_wti$WTIPrice)
+    ),
+    col = "red"
+  ) +
+  scale_color_manual(values = c(
+    'as.numeric(time(onestep2$fitted))' = 'black',
+    'as.numeric(time(test_wti$WTIPrice))' = 'red')) +
+  labs(x = "Time", y = "Price Values", title = "Predicted (Black) Vs Real WTI Prices (Red)") +
+  theme(plot.title = element_text(hjust = 0.5)) 
+
+sarima_F=arima(log(SpotCrudeOil_WTI$WTIPrice),order=c(1,1,0),seasonal=list(order=c(1,0,1),period=12))
+
+fit_24 <- Arima(log(SpotCrudeOil_WTI$WTIPrice), model=sarima_F)
+onestep_24 <- predict(fit_24, n.ahead = 24)
+accuracy(fit_24)
+
+pred <- predict(sarima, n.ahead = 36)
+
+predData <- as.data.frame(pred$pred)
+
+predData$PredictedPrices <- exp(predData$x)
