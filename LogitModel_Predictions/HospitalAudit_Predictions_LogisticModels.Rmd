@@ -1,0 +1,370 @@
+---
+output: github_document 
+always_allow_html: yes
+--- 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning=FALSE)
+library(tidyverse)
+library(mosaic)
+library(foreach)
+library(MASS) 
+library(tidyverse)
+library(class)
+library(FNN)
+library(dplyr)
+library(knitr)
+library(kableExtra)
+library(data.table)
+library(jtools)
+library(sjPlot)
+library(sjmisc)
+library(sjlabelled)
+library(huxtable)
+library(MatrixModels)
+library(sjlabelled)
+```
+
+# Problem 2: A hospital audit
+
+In problem 2, we examine the performance of the radiologists by answering two questions. The first question has the goal to observe how clinically conservative each radiologist is in recalling patients. The second question intends to answer whether radiologists weigh less importance on some risk factor that should actually be considered more rigorously when making a recall decision. 
+
+## Question 1: Are some radiologists more clinically conservative than others in recalling patients, holding patient risk factors equal?
+
+First, we compare the performance of three logistic models shown below, that regress recall on different risk factors. We use out-of-sample accuracy rates and out-of-sample error rates as model performance measures. By evaluating the accuracy rate, we examine how accurate our model is in making predictions. We also compute error rate, which is the opposite of a model's accuracy, to examine the rate of misfits.
+
+**Model 1** Recall<sub>&beta;</sub> = &beta;<sub>1</sub> age + &beta;<sub>2</sub> history + &beta;<sub>3</sub> symptoms + &beta;<sub>4</sub> menopause + &beta;<sub>5</sub> density + &beta;<sub>6</sub> radiologist + &beta;<sub>7</sub> radiologist* age + &beta;<sub>8</sub> radiologist* history + &beta;<sub>9</sub> radiologist* symptoms + &beta;<sub>10</sub> radiologist* menopause + &beta;<sub>11</sub> radiologist*density 
+ 
+**Model 2:** Recall<sub>&beta;</sub> = &beta;<sub>1</sub> age + &beta;<sub>2</sub> history + &beta;<sub>3</sub> symptoms + &beta;<sub>4</sub> menopause + &beta;<sub>5</sub> density + &beta;<sub>6</sub> radiologist 
+
+**Model 3:** Recall<sub>&beta;</sub> = &beta;<sub>1</sub> age + &beta;<sub>2</sub> symptoms + &beta;<sub>3</sub> age * symptoms + &beta;<sub>4</sub> history + &beta;<sub>5</sub> menopause + &beta;<sub>6</sub> density + &beta;<sub>7</sub> radiologist 
+We performed 100 simulations on each model and computed the average out-of-sample accuracy rate and the average out-of-sample error rate for each of the three models. Based on these performance rates, we decided which model to use to predict the probabilities of recall for each radiologist. All three models have high out of sample performance; however, models 2 and 3 have higher out of sample accuracy rates and lower error rates on average than model 1. 
+
+Table 2.1 displays the average out of sample accuracy rates and error rates for each of the three models.
+
+```{r setup 2.1.1, warning=FALSE, echo=FALSE}
+#train a good logit model on the raw data
+#Check the Accuracy of each Model; Split up the model into Accuracy&Error table vs RMSE Table 
+brca <- read.csv("https://raw.githubusercontent.com/jgscott/ECO395M/master/data/brca.csv")
+RecallResponse = do(100)* {
+  n = nrow(brca)
+  ntrain = n*0.9
+  ntest = n - n*0.9
+  TrainSet = sample.int(n, ntrain, replace = FALSE)
+  TestSet = setdiff(1:n, TrainSet)
+  Brca_Train = brca[TrainSet,]
+  Brca_Test = brca[TestSet,]
+  
+  logit_brca1 = glm(recall ~ age + history + symptoms + menopause + density + radiologist+
+                   radiologist*(age+history+symptoms+menopause+density), data=Brca_Train,
+                  family ='binomial')
+  logit_brca2 = glm(recall ~ age + history + symptoms + menopause + density + radiologist,  
+                     data=Brca_Train,
+                    family ='binomial')
+  logit_brca3 = glm(recall ~ (age + symptoms)^2+ history  + menopause + density + radiologist,  
+                    data=Brca_Train,
+                    family ='binomial')
+  
+  phatTest_logitBrca1 = predict(logit_brca1, Brca_Test, type = 'response')
+  yhatTest_logit1=ifelse(phatTest_logitBrca1>0.5,1,0)
+  
+  phatTest_logitBrca2 = predict(logit_brca2, Brca_Test, type = 'response')
+  yhatTest_logit2=ifelse(phatTest_logitBrca2>0.5,1,0)
+  
+  phatTest_logitBrca3 = predict(logit_brca3, Brca_Test, type = 'response')
+  yhatTest_logit3=ifelse(phatTest_logitBrca3>0.5,1,0)
+  
+  confusion_out1=table(y=Brca_Test$recall, yhat=yhatTest_logit1)
+  confusion_out2=table(y=Brca_Test$recall, yhat=yhatTest_logit2)
+  confusion_out3=table(y=Brca_Test$recall, yhat=yhatTest_logit3)
+  
+  c(
+   ClasAccuracyOut1 = sum(diag(confusion_out1))/sum(confusion_out1), 
+   ClasAccuracyOut2 = sum(diag(confusion_out2))/sum(confusion_out2),
+   ClasAccuracyOut3 = sum(diag(confusion_out3))/sum(confusion_out3),
+   ClassErrors1 = sum(yhatTest_logit1 != Brca_Test$recall)/ntest, 
+   ClassErrors2 = sum(yhatTest_logit2 != Brca_Test$recall)/ntest,
+   ClassErrors3 = sum(yhatTest_logit3 != Brca_Test$recall)/ntest)
+}
+Means = data.table::data.table("Accuracy Rate of Model 1" = round(mean(RecallResponse$ClasAccuracyOut1),4), 
+                   "Accuracy Rate of Model 2"  = round(mean(RecallResponse$ClasAccuracyOut2),4),
+                   "Accuracy Rate of Model 3"  = round(mean(RecallResponse$ClasAccuracyOut3),4),
+                   "Error Rate of Model 1" = round(mean(RecallResponse$ClassErrors1),4),
+                   "Error Rate of Model 2" = round(mean(RecallResponse$ClassErrors2),4),
+                   "Error Rate of Model 3" = round(mean(RecallResponse$ClassErrors3),4))
+
+view(Means)
+
+means_transpose <- t(Means)
+
+view(means_transpose)
+
+kable(means_transpose[1:6,], col.names = c("Mean"), caption = "**Table 2.1 Average Model Performance Rates**", caption_format = c("bold", "underline")) %>%
+  kable_styling(bootstrap_options = "striped", full_width = F) #%>%
+  #footnote(symbol = "Table2.1")
+```
+
+We use two indicators to determine which radiologists are more clinically conservative and which are less. The first approach is to examine the radiologists' coefficients, computing odds, and compare them while holding all risk factors constant. The second approach is to compare their overall predicted probabilities of recalling a patient. 
+
+We decided to use model 2 to run a logistic regression and compare the coefficients of each radiologist variable. The coefficient of radiologist 89 is the highest. Therefore, given that radiologist 89 is making the recall decision, the odds of a recall is multiplied by exp(0.46) ~ 1.59, compared to radiologist 13, holding all risk factors constant. Hence, out of all five radiologists, 89 is the most clinically conservative in recalling patients. On the other hand, radiologist 34 has the lowest coefficient, so if this radiologist is making the recall decision, the odds of a recall are multiplied by exp(-0.52) ~ 0.59, compared to radiologist 13, holding all other variables constant. Therefore, radiologist 34 is the least clinically conservative in recalling patients and he has the highest threshold for wanting to double check the patient's results.
+
+Table 2.2 shows the coefficients resulting from the regression model 2.
+
+```{r setup 2.1.2, warning=FALSE, echo=FALSE, results = 'asis'}
+brca <- read.csv("https://raw.githubusercontent.com/jgscott/ECO395M/master/data/brca.csv")
+logit_brca_rd1 = glm(recall ~ age + history + symptoms + menopause + density + radiologist,  
+                     data=brca,
+                     family ='binomial')
+
+tab_model(logit_brca_rd1, transform = NULL, dv.labels = "Model 2", show.ci=FALSE, show.r2 = FALSE, show.obs = FALSE, string.est = "Coefficients", title = "**Table 2.2 Coefficients of Model 2**")
+
+```
+
+Table 2.3 displays the odds ratios, confidence intervals and p-values estimated from regressing model 2. Considering the fact that radiologist 13 is the base for the logistic model, radiologist 89 and 66 both increase the odds of recall compared to radiologist 13, while radiologists 95 and 34 both decrease the odds of recall compared to radiologist 13. Hence, observing the odds ratios of each radiologist, the ranking of radiologists from most clinically conservative to least clinically conservative is as follows: radiologist 89, radiologist 66, radiologist 13, radiologist 95, radiologist 34. 
+
+```{r setup 2.1.3, warning=FALSE, echo=FALSE}
+brca <- read.csv("https://raw.githubusercontent.com/jgscott/ECO395M/master/data/brca.csv")
+logit_brca_rd1 = glm(recall ~ age + history + symptoms + menopause + density + radiologist,  
+                     data=brca,
+                     family ='binomial')
+tab_model(logit_brca_rd1, show.r2 = FALSE, show.obs = FALSE, title = "**Table 2.3 Odds Ratios of Model 2**")
+
+```
+
+To address the problem that radiologists do not see the same patients we used a counterfactual approach. We applied model 2 to compute the predicted probabilities for each radiologist. For a test set, we used the whole data set but for each prediction we transformed the first column to include only one radiologist per test set. In this way, each radiologist's average predicted probability was calculated using the same patients. To examine how conservative each radiologist is, we compared their average predicted probabilities. 
+
+Table 2.4 shows the average predicted probability of recalling a patient for each radiologist. 
+
+```{r setup 2.1.4, warning=FALSE, echo=FALSE}
+brca <- read.csv("https://raw.githubusercontent.com/jgscott/ECO395M/master/data/brca.csv")
+brca1=brca #keep the same patients data for all 5 tables 
+brca2=brca
+brca3=brca
+brca4=brca
+brca5=brca
+
+brca1$radiologist=ifelse(brca1$radiologist=="radiologist13", "radiologist13", "radiologist13") #assign radiologist13 to table 1; no change in patient data
+brca2$radiologist=ifelse(brca2$radiologist=="radiologist34", "radiologist34", "radiologist34") #assign radiologist34 to table 2 keeping the same patient data 
+brca3$radiologist=ifelse(brca3$radiologist=="radiologist66", "radiologist66", "radiologist66") #assign radiologist66 to table 3 keeping the same patient data 
+brca4$radiologist=ifelse(brca4$radiologist=="radiologist89", "radiologist89", "radiologist89") #assign radiologist89 to table 3 keeping the same patient data
+brca5$radiologist=ifelse(brca5$radiologist=="radiologist95", "radiologist95", "radiologist95") #assign radiologist95 to table 3 keeping the same patient data
+
+phatpred_logitBrca1 = predict(logit_brca2, brca1, type = 'response')
+
+phatpred_logitBrca2 = predict(logit_brca2, brca2, type = 'response')
+
+phatpred_logitBrca3 = predict(logit_brca2, brca3, type = 'response')
+
+phatpred_logitBrca4 = predict(logit_brca2, brca4, type = 'response')
+
+phatpred_logitBrca5 = predict(logit_brca2, brca5, type = 'response')
+
+MeanProbRadiologist2 = c("Radiologist 13" = mean(phatpred_logitBrca1), 
+                        "Radiologist 34" = mean(phatpred_logitBrca2), 
+                        "Radiologist 66" = mean(phatpred_logitBrca3), 
+                         "Radiologist 89" = mean(phatpred_logitBrca4), 
+                         "Radiologist 95" = mean(phatpred_logitBrca5))
+
+kable(MeanProbRadiologist2, col.names = c("Average Probability"), caption = "**Table 2.4 Average Probability per Radiologist**",  format_caption = c("italic", "underline")) %>%
+  kable_styling(bootstrap_options = "striped", full_width = F) #%>%
+  #footnote(symbol = "Table2.2") 
+```
+
+As revealed from Table 2.4, radiologist 89 can be regarded as the most clinically conservative out of all radiologists, very closely followed by 66, since both their average predicted probabilities are the highest. On the other hand, radiologist 34 is the least conservative with the lowest average predicted probability, giving risk factors constant. Therefore, if we compare radiologist 89 to radiologist 34, we can state that radiologist 89 has a lower threshold for wanting to double-check the patient's results compared to radiologist 34. These results confirm the conclusion from our first approach where we compared coefficients and odds. 
+
+To confirm the results above, we also computed false negative rates and false positive rates for each radiologist. If a radiologist has the lowest false negative, then he or she is more likely to recall the patients who have cancer so they can be treated as early as possible. On the other hand, if a radiologist has the lowest false positive rate then he or she is more likely to recall the patients who do not have cancer so they are not disturbed for no reason. 
+
+Below we list the confusion matrices for each radiologist. 
+
+```{r setup 2.1.5, warning=FALSE, echo=FALSE}
+brca <- read.csv("https://raw.githubusercontent.com/jgscott/ECO395M/master/data/brca.csv")
+Radiologist13 = xtabs(~cancer + recall, data=subset(brca, radiologist == 'radiologist13'))
+df = as.data.frame(Radiologist13)
+t1 = data.frame(yhat0 = c(df$Freq[1],df$Freq[2]),yhat1 = c(df$Freq[3],df$Freq[4]))
+row.names(t1) <- c("cancer = 0", "cancer = 1")
+kable(t1, caption = "**Confusion Matrix: Radiologist 13**",padding = 2, 
+      align = "c", col.names = c("recall = 0", "recall = 1")) %>%
+  kable_styling(full_width = F, position = "float_left")
+
+Radiologist34 = xtabs(~cancer + recall, data=subset(brca, radiologist == 'radiologist34'))
+df2 = as.data.frame(Radiologist34)
+t2 = data.frame(yhat0 = c(df2$Freq[1],df2$Freq[2]),yhat1 = c(df2$Freq[3],df2$Freq[4]))
+row.names(t2) <- c("cancer = 0", "cancer = 1")
+kable(t2, caption = "**Confusion Matrix: Radiologist 34**",padding = 2, 
+      align = "c", col.names = c("recall = 0", "recall = 1")) %>%
+  kable_styling(full_width = F, position = "right")
+
+Radiologist66 = xtabs(~cancer + recall, data=subset(brca, radiologist == 'radiologist66'))
+df3 = as.data.frame(Radiologist66)
+t3 = data.frame(yhat0 = c(df3$Freq[1],df3$Freq[2]),yhat1 = c(df3$Freq[3],df3$Freq[4]))
+row.names(t3) <- c("cancer = 0", "cancer = 1")
+kable(t3, caption = "**Confusion Matrix: Radiologist 66**",padding = 2, 
+      align = "c", col.names = c("recall = 0", "recall = 1")) %>%
+  kable_styling(full_width = F, position = "float_left")
+
+Radiologist89 = xtabs(~cancer + recall, data=subset(brca, radiologist == 'radiologist89'))
+df4 = as.data.frame(Radiologist89)
+t4 = data.frame(yhat0 = c(df4$Freq[1],df4$Freq[2]),yhat1 = c(df4$Freq[3],df4$Freq[4]))
+row.names(t4) <- c("cancer = 0", "cancer = 1")
+kable(t4, caption = "**Confusion Matrix: Radiologist 89**",padding = 2, 
+      align = "c", col.names = c("recall = 0", "recall = 1")) %>%
+  kable_styling(full_width = F, position = "right")
+
+Radiologist95 = xtabs(~cancer + recall, data=subset(brca, radiologist == 'radiologist95'))
+df5 = as.data.frame(Radiologist95)
+t5 = data.frame(yhat0 = c(df5$Freq[1],df5$Freq[2]),yhat1 = c(df5$Freq[3],df5$Freq[4]))
+row.names(t5) <- c("cancer = 0", "cancer = 1")
+kable(t5, caption = "**Confusion Matrix: Radiologist 95**",padding = 2, 
+      align = "c", col.names = c("recall = 0", "recall = 1")) %>%
+  kable_styling(full_width = F)
+
+```
+1. For radiologist 13, False Negative is 4/(4+8) = 0.5, False Positive is 25/(165+25) = 0.13.
+
+2. For radiologist 34, False Negative is 3/(3+4) = 0.43, False Positive is 13/(177+33) = 0.068.
+
+3. For radiologist 66, False Negative is 4/(4+4) = 0.5, False Positive is 33/(157+33) = 0.1737.
+
+4. For radiologist 89, False Negative is 2/(2+5) = 0.2857, False Positive is 33/(157+33) = 0.1737.
+
+5. For radiologist 95, False Negative is 2/(2+5) = 0.2857, False Positive is 22/(168+22) = 0.1158.
+
+The false positive rates support the prediction probability of results made by both models. We stated that the most clinically conservative radiologist seems to be radiologist 89 and the second most clinically conservative - radiologist 66. The false positive rates for both radiologists confirm these results since their rates are the highest. Both radiologists 89 and 66 have wrongly  recalled patients most frequently because these radiologists are the two most conservative. Radiologist 34 has the smallest false positive rate since he/she can be considered as the radiologist who is most likely to not recall patients who do not end up having cancer. This result also supports the fact that radiologist 34 is the least conservative. 
+As for the False Negative results, the radiologists that are most likely to recall the patients that do end up having cancer are radiologists 89 and 95 because they have the lowest false negatives rates. 
+
+## Question 2: Does the data suggest that radiologists should be weighing some clinical risk factors more heavily than they currently are?
+
+For question 2, we have decided to use two ways to evaluate what cancer risk factors radiologists weigh more heavily. First, we approach the problem through comparison of deviances to measure the performance of the model in terms of the predicted probabilities. Second, we examine the coefficients of each risk factor separately to conclude if radiologists are putting enough weight on these factors when making a recall decision.  
+
+In the first approach, where we compute deviances, we are not using confusion matrices and related error rates. The reason is that error rates are looking at decisions of class labels as opposed to how well-calibrated predicted probabilities are to the actual outcomes. In making decisions, both costs and probabilities matter, as different kinds of errors may have different costs, especially if we are considering the costs related to cancer outcomes. Thus, we want to evaluate the probability of prediction models independently of the decisions that it makes about the class label.
+
+By calculating the likelihood of each model's predicted probabilities and then finding the deviance, we conclude whether radiologists should be weighting some clinical factors more heavily than they currently are. The decisions are based on the magnitude of the average deviance of each model. If a model has a smaller average deviance, it is performing better than a one with higher average deviance. Hence, the model with better(smaller) deviance accounts for some factor(s) that have not been accounted for in the model with higher deviance.
+
+We compared the following logistic models that regress cancer on risk factors. Model 1 is the baseline model that we compare all other models with: 
+
+**Model 1:** Cancer<sub>&beta;</sub> = &beta;<sub>1</sub> recall
+
+**Model 2:** Cancer<sub>&beta;</sub> = &beta;<sub>1</sub> recall + &beta;<sub>2</sub> menopause
+
+**Model 3:** Cancer<sub>&beta;</sub> = &beta;<sub>1</sub> recall + &beta;<sub>2</sub> density
+
+**Model 4:** Cancer<sub>&beta;</sub> = &beta;<sub>1</sub> recall + &beta;<sub>2</sub> history
+
+**Model 5:** Cancer<sub>&beta;</sub> = &beta;<sub>1</sub> recall + &beta;<sub>2</sub> symptoms
+
+**Model 6:** Cancer<sub>&beta;</sub> = &beta;<sub>1</sub> recall + &beta;<sub>2</sub> age
+
+**Model 7:** Cancer<sub>&beta;</sub> = &beta;<sub>1</sub> recall + &beta;<sub>2</sub> density + &beta;<sub>2</sub> symptoms
+
+**Model 8:** Cancer<sub>&beta;</sub> = &beta;<sub>1</sub> recall + &beta;<sub>2</sub> density + &beta;<sub>2</sub> symptoms + &beta;<sub>2</sub> menopause
+
+We simulated 100 regressions for each model, calculated the deviances for each model and then took average of these deviances to come up with an average deviance per model. The reason why we have included models 7 and 8 is because density, symptoms and menopause have the lowest average deviances compared to all other models except the baseline model, model 1 . Hence, we wanted to observe if the average deviances of models 7 and 8 will be lower than that of the baseline model. 
+
+Table 2.5 reveals the average deviance of each of the 10 models.
+
+```{r setup 2.1.6, warning=FALSE, echo=FALSE}
+brca <- read.csv("https://raw.githubusercontent.com/jgscott/ECO395M/master/data/brca.csv")
+dev_out = function(y, probhat) {
+  p0 = 1-probhat
+  phat = data.frame(P0 = p0, p1 = probhat)
+  rc_pairs = cbind(seq_along(y), y + 1)
+  -2*sum(log(phat[rc_pairs]))
+}
+
+
+CancerResponse3 = do(100)* {
+  n = nrow(brca)
+  ntrain = n*0.9
+  ntest = n - n*0.9
+  TrainSet = sample.int(n, ntrain, replace = FALSE)
+  TestSet = setdiff(1:n, TrainSet)
+  Brca_Train = brca[TrainSet,]
+  Brca_Test = brca[TestSet,]
+  
+  logit_cancer1 = glm(cancer ~ recall, data=Brca_Train, family ='binomial')
+  logit_cancer2 = glm(cancer ~ recall + menopause, data=Brca_Train, family ='binomial')
+  logit_cancer3 = glm(cancer ~ recall + density, data=Brca_Train, family ='binomial') 
+  logit_cancer4 = glm(cancer ~ recall + history, data=Brca_Train, family ='binomial')  
+  logit_cancer5 = glm(cancer ~ recall + symptoms,  data=Brca_Train, family ='binomial')
+  logit_cancer6 = glm(cancer ~ recall + age,  data=Brca_Train, family ='binomial')
+  logit_cancer7 = glm(cancer ~ recall + density + symptoms, data=Brca_Train, family ='binomial')  
+  logit_cancer8 = glm(cancer ~ recall + density + symptoms + menopause, data=Brca_Train, family ='binomial')  
+  
+  phatTest_logitcancer1 = predict(logit_cancer1, Brca_Test, type = 'response')
+  phatTest_logitcancer2 = predict(logit_cancer2, Brca_Test, type = 'response')
+  phatTest_logitcancer3 = predict(logit_cancer3, Brca_Test, type = 'response')
+  phatTest_logitcancer4 = predict(logit_cancer4, Brca_Test, type = 'response')
+  phatTest_logitcancer5 = predict(logit_cancer5, Brca_Test, type = 'response')
+  phatTest_logitcancer6 = predict(logit_cancer6, Brca_Test, type = 'response')
+  phatTest_logitcancer7 = predict(logit_cancer7, Brca_Test, type = 'response')
+  phatTest_logitcancer8 = predict(logit_cancer8, Brca_Test, type = 'response')  
+
+  yhatTest_logitcancer1 = ifelse(phatTest_logitcancer1 > 0.0374, 1, 0)
+  yhatTest_logitcancer2 = ifelse(phatTest_logitcancer2 > 0.0374, 1, 0)
+  yhatTest_logitcancer3 = ifelse(phatTest_logitcancer3 > 0.0374, 1, 0)
+  yhatTest_logitcancer4 = ifelse(phatTest_logitcancer4 > 0.0374, 1, 0)
+  yhatTest_logitcancer5 = ifelse(phatTest_logitcancer5 > 0.0374, 1, 0)
+  yhatTest_logitcancer6 = ifelse(phatTest_logitcancer6 > 0.0374, 1, 0)
+  yhatTest_logitcancer7 = ifelse(phatTest_logitcancer7 > 0.0374, 1, 0)
+  yhatTest_logitcancer8 = ifelse(phatTest_logitcancer8 > 0.0374, 1, 0)
+ 
+  c(devBaseline=dev_out(Brca_Test$cancer, phatTest_logitcancer1),
+    devMenop=dev_out(Brca_Test$cancer, phatTest_logitcancer2),
+    devDensity=dev_out(Brca_Test$cancer, phatTest_logitcancer3),
+    devHist=dev_out(Brca_Test$cancer, phatTest_logitcancer4),
+    devSympt=dev_out(Brca_Test$cancer, phatTest_logitcancer5),
+    devAge=dev_out(Brca_Test$cancer, phatTest_logitcancer6),
+    devDS=dev_out(Brca_Test$cancer, phatTest_logitcancer7),
+    devDSM=dev_out(Brca_Test$cancer, phatTest_logitcancer8))
+ 
+}
+
+MeanDev = data.table::data.table("Deviance: Baseline"=mean(CancerResponse3$devBaseline), 
+               "Deviance: Menopause"=mean(CancerResponse3$devMenop), 
+               "Deviance: Density"=mean(CancerResponse3$devDensity),
+               "Deviance: History"=mean(CancerResponse3$devHist),
+               "Deviance: Symptoms"=mean(CancerResponse3$devSympt),
+               "Deviance: Age"=mean(CancerResponse3$devAge),
+               "Deviance: Density&Symptoms"=mean(CancerResponse3$devDS), 
+               "Deviance: Density, Symptoms & Menopause"=mean(CancerResponse3$devDSM))
+
+DevMeans_transpose <- t(MeanDev)
+
+kable(DevMeans_transpose[1:8,], col.names = c("Average Deviance"), caption = "**Table 2.5 Average Deviance per Model**",  format_caption = c("italic", "underline")) %>%
+  kable_styling(bootstrap_options = "striped", full_width = F) #%>%
+  #footnote(symbol = "Table2.3") 
+```
+We consider the first model, where we are regressing cancer on recall, as the baseline model. If the radiologists have been weighing risk factors flawlessly, the baseline model would have the lowest deviance, as they take into account all the risk factors when making decisions to recall the patients. By comparing the baseline model with all the models that have only one more variable added to the recall variable (models 2, 3, 4, 5, 6), we find that the lowest average deviance has model 1, the baseline model, as shown in Table 2.5. This result indicates that radiologists are considering strongly enough all the risk factors when making a recall decision. 
+
+Lastly, in the second approach, we compare the coefficients of models 2, 3, 4, 5, and 6 to see if they are high enough. If a coefficient has a significant effect on the odds of having a cancer, then the radiologist may not be considering that risk factor as strongly in making his or her recall decision. 
+The following table shows the coefficients of each of the models that consist of one other variable except the recall. 
+
+```{r setup 2.1.7, warning=FALSE, echo=FALSE}
+brca <- read.csv("https://raw.githubusercontent.com/jgscott/ECO395M/master/data/brca.csv")
+logit_cancer1 = glm(cancer ~ recall, data=brca, family ='binomial')
+logit_cancer2 = glm(cancer ~ recall + menopause, data=brca, family ='binomial')
+logit_cancer3 = glm(cancer ~ recall + density, data=brca, family ='binomial') 
+logit_cancer4 = glm(cancer ~ recall + history, data=brca, family ='binomial')  
+logit_cancer5 = glm(cancer ~ recall + symptoms,  data=brca, family ='binomial')
+logit_cancer6 = glm(cancer ~ recall + age,  data=brca, family ='binomial')
+
+tab_model(logit_cancer1, logit_cancer2, logit_cancer3, logit_cancer4, logit_cancer5, logit_cancer6, 
+          transform = NULL, dv.labels = c("Model 1", "Model 2", "Model 3", "Model 4", "Model 5", "Model 6"), 
+          show.ci=FALSE, show.p = FALSE, show.r2 = FALSE, show.obs = FALSE, string.est = "Coefficients", title = "**Table 2.6 Coefficients of Models** ")
+```
+As seen from the table above, the highest coefficients are for density, age and menopause. Looking at model 3, the patients with a risk factor of density [4] (extremely danse) have exp(1.62) ~ 5.05 times the odds of having cancer as patients with density 1, even holding recall status constant. Hence, we can conclude that radiologists may not be weighting as much importance to density (or more accurately, density [4]) as they should be when interpreting the mammogram and deciding whether to recall the patient. Considering models 6 and 2, patients older than 70 have exp(0.92) ~ 2.51 times the odds of having cancer as patients younger than 50, holding recall status constant. Also, if the patient has been observed to have a postmenounknown menopause risk factor, then she has exp(0.77) ~ 2.51 times the odds of having cancer compared to a patient with post menopause $HT, holding recall constant. All 3 of these coefficients significantly influence the odds of having a cancer, especially the density [4] coefficient. Therefore, radiologists should be suggested to weigh density, age, and menopause (or more accurately, density [4], age above 70, and unknown menopause) more heavily than they currently are. 
+
+Regressing cancer on these 3 variables: density, age and menopause together, increases the coefficients for density and age even more as revealed in the table below. The table 2.7 displays the coefficients of the logistic model 7. 
+
+**Model 7:** Cancer<sub>&beta;</sub> = &beta;<sub>1</sub> recall + &beta;<sub>2</sub> density + &beta;<sub>2</sub> age + &beta;<sub>2</sub> menopause
+
+```{r setup 2.1.8, warning=FALSE, echo=FALSE}
+brca <- read.csv("https://raw.githubusercontent.com/jgscott/ECO395M/master/data/brca.csv")
+logit_cancer7 = glm(cancer ~ recall + density + age + menopause, data=brca, family ='binomial')
+
+tab_model(logit_cancer7, transform = NULL, dv.labels = c("Model 7"), 
+          show.ci=FALSE, show.p = FALSE, show.r2 = FALSE, show.obs = FALSE, string.est = "Coefficients", title="**Table 2.7 Coefficients of Model 7**")
+```
+The two approaches lead us to slightly different conclusions. First, the comparison of each model's average deviance revealed that the baseline model (cancer regressed only on recall) has the lowest deviance on average; hence, radiologists are already weighing sufficient importance on all risk factors. However, the comparison of each risk factor's coefficient showed us that radiologist should actually weigh density, age and menopause stronger than they currently are in making recall decisions. 
+
+Since the deviance measure can be considered more unstable than examining the coefficients, we will lean on the results from approach 2 and conclude that radiologists should be placing more importance on density, age and menopause when making a recall decision. 
