@@ -1,0 +1,402 @@
+---
+output: github_document 
+always_allow_html: yes
+--- 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning=FALSE)
+library(tidyverse)
+library(mosaic)
+library(foreach)
+library(MASS) 
+library(tidyverse)
+library(class)
+library(FNN)
+library(dplyr)
+library(knitr)
+library(kableExtra)
+library(data.table)
+library(jtools)
+library(sjPlot)
+library(sjmisc)
+library(sjlabelled)
+library(huxtable)
+library(MatrixModels)
+library(sjlabelled)
+```
+
+# Problem 1. Saratoga house prices
+## Question 1: What model outperforms the "medium" model considered in class? 
+
+*Medium Model:* price ~ lotSize + age + livingArea + pctCollege + bedrooms + fireplaces+bathrooms + rooms + heating + fuel + centralAir
+
+In this exercise, the purpose is to choose a model that outperforms the above medium model in predicting housing prices based on the dataset Saratoga. The dataset has 1728 observations and 16 variables including price, land value, age, rooms, and other house characteristics. The target variable is the price. Before building models, there is an issue about the target variable: a housing price consists of the land value and the house value. The land value is predetermined before a house is built and is less likely to be affected by those house characteristics. Moreover, the land value is an intrinsic part of a housing price. So, generally, the land value should be excluded from our feature variables to avoid regressing the target variable on a variable that is a part of the target variable itself. To tackle this issue, we used the following procedure.
+
+*Step 1.* Use price as the target variable: 
+
+1)	Manually build a model that has a lower RMSE than the medium model of price;
+
+2)	Use forward selection method to automatically select a model with the lowest AIC;
+
+3)	Compare the RMSE of the model manually built and the RMSE of the model forward selected, and choose the model with a lower RMSE.
+
+*Step 2.* Generate a new target variable, houseValue, by subtracting land value from the price:
+
+1)	Build a medium model using houseValue as the target variable and the same feature variables as in the medium model of Step 1;
+
+2)	Manually build a model that has a lower RMSE than above medium model of house value;
+
+3)	Use forward selection method to automatically select a model with the lowest AIC and compare the RMSE of the selected model with the RMSE of the manually built model, and choose the model with a lower RMSE.
+
+*Step 3.* Compare the chosen model in Step 1 with the chosen model in Step 2 and use the model with a lower RMSE to help predict the housing price.
+
+Table 1.1 shows the models we compared in Step 1.
+
+``` {r results='asis'}
+x=matrix(c("Baseline Model 1 (Medium Model)", 
+           "price = lotSize + age + livingArea + pctCollege + bedrooms + fireplaces+bathrooms + rooms + heating + fuel + centralAir", 
+           "Price Model 1 (Manually Built Model)", 
+           "price = rooms + bathrooms + bathrooms*rooms + lotSize + newConstruction+livingArea + livingArea*rooms + lotSize * livingArea + pctCollege + heating + fuel + livingArea * (heating + fuel) + centralAir + waterfront",
+           "Price Model 2 (Forward Selected Model)",
+           "price = livingArea + landValue + bathrooms + waterfront + newConstruction + heating + lotSize + age + centralAir + rooms + bedrooms + landValue * newConstruction + bathrooms * heating + livingArea * bathrooms + lotSize * age + livingArea * waterfront + landValue * lotSize + livingArea * centralAir + age * centralAir + livingArea * landValue + bathrooms * bedrooms + bathrooms * waterfront + heating * bedrooms + heating * rooms + waterfront * centralAir + waterfront * lotSize + landValue * age + age * rooms + livingArea * lotSize + lotSize * rooms + lotSize * centralAir",
+           "Price Model 2.1 (Forward Selected Model without landValue)",
+           "price = livingArea + bathrooms + waterfront + newConstruction + heating+lotSize + age + centralAir + rooms + bedrooms + bathrooms * heating + livingArea * bathrooms + lotSize * age + livingArea * waterfront + livingArea * centralAir + age * centralAir + bathrooms * bedrooms + bathrooms * waterfront + heating * bedrooms + heating * rooms + waterfront * centralAir + waterfront * lotSize + age * rooms+livingArea * lotSize + lotSize * rooms + lotSize * centralAir")
+, nrow=8, ncol=1)
+kable(x, caption="**Table 1.1 : Models With Price As the Target Variable**")%>%
+  kable_styling(position="center", full_width = NULL)
+```
+
+All the models are measured by the average out-of-sample RMSE.  After randomly splitting the dataset into a train data set and a test dataset, we ran three models in the train dataset, and then used the test dataset to get an out-of-sample RMSE for each model. We repeated this procedure for 100 times and then took the average of all out-of-sample RMSE. The average out-of-sample RMSE are listed in the following table.
+
+```{r, results='asis'}
+data(SaratogaHouses)
+SaratogaHouses = mutate(SaratogaHouses, houseValue = price - landValue)
+SaratogaHouses = mutate(SaratogaHouses, RoomsNoBed = rooms - bedrooms)
+rmse = function(y, yhat) {
+  sqrt( mean( (y - yhat)^2 ) )}
+LoopRMSE = do(100)*{
+    n = nrow(SaratogaHouses)
+    n_train = round(0.8*n)  # round to nearest integer
+    n_test = n - n_train
+    train_cases = sample.int(n, n_train, replace=FALSE)
+    test_cases = setdiff(1:n, train_cases) 
+    saratoga_train = SaratogaHouses[train_cases,]
+    saratoga_test = SaratogaHouses[test_cases,]
+    
+    lm_medium = lm(price ~ lotSize + age + livingArea + pctCollege + bedrooms + 
+                     fireplaces + bathrooms + rooms + heating + fuel + centralAir, data=saratoga_train)
+    #improved model for price that includes land value 
+    lm_price = lm(price ~ rooms + bathrooms + bathrooms*rooms  + lotSize + newConstruction
+                  + livingArea + livingArea*rooms + lotSize*livingArea + pctCollege + heating + fuel 
+                  +livingArea*(heating + fuel) + centralAir + waterfront
+                  ,data=saratoga_train)
+    
+    lm_price1 = lm(price ~ livingArea + landValue + bathrooms + waterfront + newConstruction + 
+                     heating + lotSize + age + centralAir + rooms + bedrooms + 
+                     landValue:newConstruction + bathrooms:heating + livingArea:bathrooms + 
+                     lotSize:age + livingArea:waterfront + landValue:lotSize + 
+                     livingArea:centralAir + age:centralAir + livingArea:landValue + 
+                     bathrooms:bedrooms + bathrooms:waterfront + heating:bedrooms + 
+                     heating:rooms + waterfront:centralAir + waterfront:lotSize + 
+                     landValue:age + age:rooms + livingArea:lotSize + lotSize:rooms + 
+                     lotSize:centralAir, data=saratoga_train)
+    
+    
+    lm_price2 = lm(price ~ livingArea +  bathrooms + waterfront + newConstruction + heating + lotSize + age +
+                     centralAir + rooms + bedrooms + bathrooms:heating + livingArea:bathrooms + 
+                     lotSize:age + livingArea:waterfront +  livingArea:centralAir + age:centralAir  + 
+                     bathrooms:bedrooms + bathrooms:waterfront + heating:bedrooms + heating:rooms + 
+                     waterfront:centralAir + waterfront:lotSize + age:rooms + livingArea:lotSize + lotSize:rooms + 
+                     lotSize:centralAir
+                   ,data=saratoga_train)
+    
+  
+    
+    yhat_test_medium = predict(lm_medium, saratoga_test)
+    yhat_test_price = predict(lm_price, saratoga_test)
+    yhat_test_price1 = predict(lm_price1, saratoga_test)
+    yhat_test_price2 = predict(lm_price2, saratoga_test)
+  
+    
+    c(RmseMedium=rmse(saratoga_test$price, yhat_test_medium), 
+      rmsePrice =rmse(saratoga_test$price, yhat_test_price), 
+      RmsePrice1 = rmse(saratoga_test$price, yhat_test_price1),
+      RmsePrice2 = rmse(saratoga_test$price, yhat_test_price2)) 
+    
+  }
+RMSEMean = rbind("Baseline Model 1 " = mean(LoopRMSE$RmseMedium), 
+                      "Price Model 1 " = mean(LoopRMSE$rmsePrice), 
+                      "Price Model 2 " = mean(LoopRMSE$RmsePrice1),
+                      "Price Model 2.1 " = mean(LoopRMSE$RmsePrice2))
+kable(RMSEMean, caption="**Table 1.2 : RMSE for Price Models of Step 1**")%>%
+  kable_styling(full_width = FALSE)%>%
+  column_spec(1, width = "10em")
+```
+
+According to the above table, the Price Model 2 has the lowest average out-of-sample (usually around 58000, sometimes even below 57000). However, the Price Model 2 includes the variable landValue as a feature variable, which is a part of price. Therefore, the low RMSE of Price Model 2 is probably from using a part of the target variable to explain the outcome, which disturbs the assessment of the predictive abilities of the feature variables. To see that, we ran the Price Model 2 after removing landValue and its interactions with other feature variables on the right-hand side. The resulted RMSE (of Price Model 2.1) increased to around 64000, though still lower than the Baseline Model 1.
+
+To address this problem, we implemented the Step 2, building three models with the houseValue as the target variable, as shown in Table 1.3
+
+``` {r results='asis'}
+x=matrix(c("Baseline Model 2 (Medium Model of houseValue)", 
+           "houseValue = lotSize + age + livingArea + pctCollege + bedrooms + fireplaces + bathrooms + rooms + heating + fuel + centralAir", 
+           "House Value Model 1 (Manually Built Model)", 
+           "houseValue = landValue + rooms + bathrooms + bathrooms*rooms + lotSize + newConstruction+ livingArea + livingArea * rooms+lotSize * livingArea + pctCollege + heating + fuel  +livingArea * heating + livingArea * fuel+centralAir + waterfront",
+           "House Value Model 2 (Forward Selected Model)",
+           "houseValue = livingArea + bathrooms + waterfront + newConstruction + heating + lotSize + age + rooms + centralAir + landValue + bedrooms + bathrooms * heating + livingArea * bathrooms + lotSize * age + livingArea * newConstruction + livingArea * waterfront + livingArea * centralAir + age * centralAir + newConstruction * landValue + lotSize * landValue + livingArea * landValue + bathrooms * bedrooms + bathrooms * newConstruction + heating * bedrooms + heating * rooms + bathrooms * waterfront + waterfront * centralAir + waterfront * lotSize + age * landValue + age * rooms + livingArea * lotSize + lotSize * rooms + lotSize * centralAir"), nrow=6, ncol=1)
+kable(x, caption="**Table 1.3 : Models With houseValue As the Target Variable**")%>%
+  kable_styling(position="center", full_width = NULL)
+```
+
+The Baseline Model 2 has the same feature variables as the Baseline Model 1. The main difference between HouseValue Model 1 and Price Model 1 is that HouseValue Model 1 includes landvalue but Price Model 1 does not. We are now free to include landvalue as a feature variable since it is not part of the target variable anymore. 
+
+House Value Model 2 was picked by the forward selection. The average out-of-sample RMSE are shown in Table 1.4.
+
+```{r, results='asis'}
+data(SaratogaHouses)
+SaratogaHouses = mutate(SaratogaHouses, houseValue = price - landValue)
+SaratogaHouses = mutate(SaratogaHouses, RoomsNoBed = rooms - bedrooms)
+rmse = function(y, yhat) {
+  sqrt( mean( (y - yhat)^2 ) )}
+LoopRMSE = do(100)*{
+    n = nrow(SaratogaHouses)
+    n_train = round(0.8*n)  # round to nearest integer
+    n_test = n - n_train
+    train_cases = sample.int(n, n_train, replace=FALSE)
+    test_cases = setdiff(1:n, train_cases) 
+    saratoga_train = SaratogaHouses[train_cases,]
+    saratoga_test = SaratogaHouses[test_cases,]
+    
+  
+    lm_medium2 = lm(houseValue ~ lotSize + age + livingArea + pctCollege + bedrooms + 
+                     fireplaces + bathrooms + rooms + heating + fuel + centralAir, data=saratoga_train)
+    
+    lm_houseValue = lm(houseValue ~ landValue + rooms + bathrooms + bathrooms*rooms  + lotSize + newConstruction
+                       + livingArea + livingArea*rooms + lotSize*livingArea + pctCollege + heating + fuel 
+                       +livingArea*(heating + fuel) + centralAir + waterfront , data=saratoga_train)
+    
+    lm_houseValue2 = lm(houseValue ~ livingArea + bathrooms + waterfront + newConstruction + 
+                          heating + lotSize + age + rooms + centralAir + landValue + 
+                          bedrooms + bathrooms:heating + livingArea:bathrooms + lotSize:age + 
+                          livingArea:newConstruction + livingArea:waterfront + livingArea:centralAir + 
+                          age:centralAir + newConstruction:landValue + lotSize:landValue + 
+                          livingArea:landValue + bathrooms:bedrooms + bathrooms:newConstruction + 
+                          heating:bedrooms + heating:rooms + bathrooms:waterfront + 
+                          waterfront:centralAir + waterfront:lotSize + age:landValue + 
+                          age:rooms + livingArea:lotSize + lotSize:rooms + lotSize:centralAir, 
+                        data=saratoga_train)
+    
+   
+    yhat_test_medium2 = predict(lm_medium2, saratoga_test)+saratoga_test$landValue
+    yhat_test_housevalue_price=predict(lm_houseValue, saratoga_test) + saratoga_test$landValue
+    yhat_test_housevalue_price2=predict(lm_houseValue2, saratoga_test) + saratoga_test$landValue
+    
+    c(
+      RmseMedium2=rmse(saratoga_test$price, yhat_test_medium2),
+      RrmseHouseValueprice1 = rmse(saratoga_test$price, yhat_test_housevalue_price),
+      RmseHouseValueprice2 = rmse(saratoga_test$price, yhat_test_housevalue_price2)) 
+    
+  }
+RMSEMean = rbind("Baseline Model 2 " = mean(LoopRMSE$RmseMedium2),
+                      "House Value Model 1 " = mean(LoopRMSE$RrmseHouseValueprice1),
+                      "House Value Model 2 " = mean(LoopRMSE$RmseHouseValueprice2))
+kable(RMSEMean, caption="**Table 1.4 : RMSE for HouseValue Models of Step 2**")
+```
+
+The results show that the House Value Model 1 and House Value Model 2 both have the average out-of-sample RMSE around 59000. This value is much lower than that of Price Model 2.1, but close to that of Price Model 2 that regresses price on landValue and other characteristics. 
+
+Therefore, based on the average out-of-sample RMSE, we can choose either House Value Model 1 or House Value Model 2. If we prefer a more parsimonious model, House Value Model 1 is to be selected. If preferring a lower AIC, House Value Model 2 is to be selected since forward selection in default returns the model with the lowest AIC. But both have much lower RMSE than the Baseline Model 2 as well as Baseline Model 1. 
+
+Note that since HouseValue models predict house values nor house prices, we need to add those corresponding land values to predicted house values when predicting prices.
+
+## Question 2: Which Variables or Interactions Drive Prices More?
+In this part, we decide to use a more parsimonious model, House Value Model 1, to examine feature variables' coefficients. To see which variables and interactions are extremely strong in driving the price, we list the estimates of coefficients in the Table 1.5.
+
+```{r, results='asis'}
+data(SaratogaHouses)
+SaratogaHouses = mutate(SaratogaHouses, houseValue = price - landValue)
+SaratogaHouses = mutate(SaratogaHouses, RoomsNoBed = rooms - bedrooms)
+    lm_houseValue = lm(houseValue ~ landValue + rooms + bathrooms + bathrooms*rooms  + lotSize + newConstruction
+                       + livingArea + livingArea*rooms + lotSize*livingArea + pctCollege + heating + fuel 
+                       +livingArea*(heating + fuel) + centralAir + waterfront , data=SaratogaHouses)
+tab_model(lm_houseValue, transform = NULL, dv.labels = 
+            c( "House Value Model 1"), string.est = "Coefficients", show.ci=0.95, title = "**Table 1.5 Coefficients of House Value Model 1**",  show.obs= FALSE, show.r2= FALSE)
+    
+```
+
+A brief look tells us that those variables and interactions with significant coefficients can be candidates of extremely strong drivers of prices. Such variables include the size of lot (lotSize),  if the house is newly constructed (newConstructionNo), the living area, type of heating system (hot water/steam and electric), the sources of heating (fuel), if a house includes waterfront (waterfrontNo),  and the interactions between the living area and heating as well as the living area and fuel.
+
+To decide their relative strength in driving prices, we ran nine different modifications of the House Value Model 1 but for each of the nine models we excluded the specific variable of interest from the House Value Model 1. Afterwards, we got the average out-of-sample RMSE for each of these 9 models. The higher the average out-of-sample RMSE of a model relative to that of the House Value Model 1, the stronger is that excluded variable as a price driver. We subtracted the House Value Model 1's average RMSE from each of the nine models' average RMSE to see the impact of the excluded variables. The results are shown in Table 1.6
+
+``` {r, results='asis'}
+data(SaratogaHouses)
+SaratogaHouses = mutate(SaratogaHouses, houseValue = price - landValue)
+SaratogaHouses = mutate(SaratogaHouses, RoomsNoBed = rooms - bedrooms)
+rmse = function(y, yhat) {
+  sqrt( mean( (y - yhat)^2 ) )}
+                  
+LoopRMSE2 = do(500)*{
+  n = nrow(SaratogaHouses)
+  n_train = round(0.8*n)  # round to nearest integer
+  n_test = n - n_train
+  train_cases = sample.int(n, n_train, replace=FALSE)
+  test_cases = setdiff(1:n, train_cases) 
+  saratoga_train = SaratogaHouses[train_cases,]
+  saratoga_test = SaratogaHouses[test_cases,]
+  
+  lm_houseValue = lm(houseValue ~ landValue + rooms + bathrooms + bathrooms*rooms  + lotSize + newConstruction
+                       + livingArea + livingArea*rooms + lotSize*livingArea + pctCollege + heating + fuel 
+                       +livingArea*(heating + fuel) + centralAir + waterfront , data=saratoga_train)
+  
+  model_lotsize = lm(houseValue ~ landValue + rooms + bathrooms + bathrooms*rooms  + newConstruction
+                     + livingArea + livingArea*rooms + lotSize*livingArea + pctCollege + heating + fuel 
+                     +livingArea*(heating + fuel) + centralAir + waterfront , data=saratoga_train)
+  
+  model_necon = lm(houseValue ~ landValue + rooms + bathrooms + bathrooms*rooms  + lotSize 
+                     + livingArea + livingArea*rooms + lotSize*livingArea + pctCollege + heating + fuel 
+                     +livingArea*(heating + fuel) + centralAir + waterfront , data=saratoga_train)
+  
+  model_lva = lm(houseValue ~ landValue + rooms + bathrooms + bathrooms*rooms  + lotSize + newConstruction
+                     + livingArea*rooms + lotSize*livingArea + pctCollege + heating + fuel 
+                     +livingArea*(heating + fuel) + centralAir + waterfront , data=saratoga_train)
+  
+  model_heating = lm(houseValue ~ landValue + rooms + bathrooms + bathrooms*rooms  + lotSize + newConstruction
+                     + livingArea + livingArea*rooms + lotSize*livingArea + pctCollege + fuel 
+                     +livingArea*(heating + fuel) + centralAir + waterfront , data=saratoga_train)
+  
+  model_fuel = lm(houseValue ~ landValue + rooms + bathrooms + bathrooms*rooms  + lotSize + newConstruction
+                     + livingArea + livingArea*rooms + lotSize*livingArea + pctCollege + heating  
+                     +livingArea*(heating + fuel) + centralAir + waterfront , data=saratoga_train)
+  
+  model_water = lm(houseValue ~ landValue + rooms + bathrooms + bathrooms*rooms  + lotSize + newConstruction
+                     + livingArea + livingArea*rooms + lotSize*livingArea + pctCollege + heating + fuel 
+                     +livingArea*(heating + fuel)   , data=saratoga_train)
+  
+  model_centra = lm(houseValue ~ landValue + rooms + bathrooms + bathrooms*rooms  + lotSize + newConstruction
+                     + livingArea + livingArea*rooms + lotSize*livingArea + pctCollege + heating + fuel 
+                     +livingArea*(heating + fuel)  + waterfront , data=saratoga_train)
+  
+  model_lva_heat = lm(houseValue ~ landValue + rooms + bathrooms + bathrooms*rooms  + lotSize + newConstruction
+                     + livingArea + livingArea*rooms + lotSize*livingArea + pctCollege + heating + fuel 
+                     +livingArea*( fuel) + centralAir + waterfront , data=saratoga_train)
+  
+  
+  model_lva_fuel = lm(houseValue ~ landValue + rooms + bathrooms + bathrooms*rooms  + lotSize + newConstruction
+                     + livingArea + livingArea*rooms + lotSize*livingArea + pctCollege + heating + fuel 
+                     +livingArea*(heating ) + centralAir + waterfront , data=saratoga_train)
+  
+  yhat_test_housevalue_price=predict(lm_houseValue, saratoga_test) + saratoga_test$landValue
+  yhat_test1 = predict(model_lotsize, saratoga_test) + saratoga_test$landValue
+  yhat_test2 = predict(model_necon, saratoga_test) + saratoga_test$landValue
+  yhat_test3 = predict(model_lva, saratoga_test) + saratoga_test$landValue
+  yhat_test4 = predict(model_heating, saratoga_test) + saratoga_test$landValue
+  yhat_test5 = predict(model_fuel, saratoga_test) + saratoga_test$landValue
+  yhat_test6 = predict(model_water, saratoga_test) + saratoga_test$landValue
+  yhat_test7 = predict(model_centra, saratoga_test) + saratoga_test$landValue
+  yhat_test8 = predict(model_lva_heat, saratoga_test) + saratoga_test$landValue
+  yhat_test9 = predict(model_lva_fuel, saratoga_test) + saratoga_test$landValue
+  
+  c(
+    Rmse1=rmse(saratoga_test$price, yhat_test1)-rmse(saratoga_test$price, yhat_test_housevalue_price), 
+    Rmse2 =rmse(saratoga_test$price, yhat_test2)-rmse(saratoga_test$price, yhat_test_housevalue_price), 
+    Rmse3 = rmse(saratoga_test$price, yhat_test3)-rmse(saratoga_test$price, yhat_test_housevalue_price),
+    Rmse4 = rmse(saratoga_test$price, yhat_test4)-rmse(saratoga_test$price, yhat_test_housevalue_price),
+    Rmse5 =rmse(saratoga_test$price, yhat_test5)-rmse(saratoga_test$price, yhat_test_housevalue_price),
+    Rmse6 = rmse(saratoga_test$price, yhat_test6)-rmse(saratoga_test$price, yhat_test_housevalue_price),
+    Rmse7 = rmse(saratoga_test$price, yhat_test7)-rmse(saratoga_test$price, yhat_test_housevalue_price),
+    Rmse8 = rmse(saratoga_test$price, yhat_test8)-rmse(saratoga_test$price, yhat_test_housevalue_price),
+    Rmse9 = rmse(saratoga_test$price, yhat_test9)-rmse(saratoga_test$price, yhat_test_housevalue_price)) 
+  
+}
+RMSEMeanDiff = rbind("lotSize" = mean(LoopRMSE2$Rmse1), 
+                      "NewConstruction" = mean(LoopRMSE2$Rmse2) , 
+                      "livingArea" = mean(LoopRMSE2$Rmse3) ,
+                      "heating" = mean(LoopRMSE2$Rmse4) ,
+                      "fuel" = mean(LoopRMSE2$Rmse5) ,
+                      "waterfront" = mean(LoopRMSE2$Rmse6) ,
+                      "centralAir" = mean(LoopRMSE2$Rmse7),
+                      "livingArea*heating" = mean(LoopRMSE2$Rmse8) ,
+                      "livingArea*fuel" = mean(LoopRMSE2$Rmse9))
+RMSEMeanDiff=round(RMSEMeanDiff, 2)
+kable(RMSEMeanDiff, caption = "**Table 1.6 Use Changes in RMSE to Evaluate Price Drivers**")
+```
+
+From the difference in RMSE, we can see that five variables have very strong impact on prices: waterfront,
+newConstruction, livingArea * heating, and livingArea * fuel and centralAir. Other variables are not strong drivers of prices from the a perspective of RMSE.
+
+Hence, coefficients and RMSE tell us some different results about which variables and interactions are driving prices more. By coefficients, variables like lotSize, heaing, and fuel are strong in driving prices while according to the RMSE they have no such significant impact on prices. And variables like livingArea * heating are important to drive prices based on RMSE but their magnitudes are too small from the perspective of coefficients. Combining the results of two approaches, it may be less disputable to conclude that waterfront, newConstruction, and centralAir are three most important factors in driving prices.
+
+## Question 3: The Performance of KNN Method
+Now we use KNN regression to predict prices. The approach is similar: first, use price as the target variable, then use house value as the target variable, at last, choose the model (i.e. choose the value of K) with a lower RMSE and compare it with the RMSE we have gotten in Q 1.1.
+A special aspect in KNN regression is that since the distances between K points are very sensitive to the magnitudes of variables, all the variables have to be standardized by their standard deviations at first. Except that, the whole procedure is the same as in linear regression.
+Table 6 shows the lowest average out-of-sample RMSE and corresponding K values for price KNN model and house value KNN model. We also show how the average out-of-sample RMSE vary with the different values of K in Graph 1 (for price model) and Graph 2 (for house value model).
+
+```{r, results='asis', fig.align='left'}
+knn_result2=data.frame(k=c(), rsme=c(), sd=c())
+k_grid = seq(2, 50, by=1)
+LoopKNN2 = foreach(k=k_grid, .combine='c') %do% {
+  out = do(100)*{
+    n = nrow(SaratogaHouses)
+    n_train = round(0.8*n)  # round to nearest integer
+    n_test = n - n_train
+    train_cases = sample.int(n, n_train, replace=FALSE)
+    test_cases = setdiff(1:n, train_cases)
+    saratoga_train = SaratogaHouses[train_cases,]
+    saratoga_test = SaratogaHouses[test_cases,]
+    k_grid = seq(2, 50, by=1)
+    
+    Xtrain = model.matrix(~.- (houseValue + price) - 1,data=saratoga_train)
+    Xtest = model.matrix(~.- (houseValue + price) - 1,data=saratoga_test)
+    Ytrain = saratoga_train$houseValue
+    Ytest = saratoga_test$houseValue
+    Ytrain1 = saratoga_train$price
+    Ytest1 = saratoga_test$price
+    
+    scales = apply(Xtrain, 2, sd)
+    Xtrain_scaled = scale(Xtrain, scale=scales)
+    Xtest_scaled = scale(Xtest, scale=scales)
+    
+    knnPred1 = knn.reg(Xtrain_scaled, Xtest_scaled, Ytrain1, k=k)
+    
+    
+    knnPred = knn.reg(Xtrain_scaled, Xtest_scaled, Ytrain, k=k)
+    c(rmseKNN1= rmse(Ytest1, knnPred1$pred), rmseKNN = rmse(Ytest, knnPred$pred))
+    
+  }
+  knn_result2=rbind(knn_result2,c(k, mean(out$rmseKNN1), mean(out$rmseKNN)))
+}
+colnames(knn_result2)=c("K", "Mean_RMSE1", "Mean_RMSE")
+MinimumMean1= data.table::data.table("Models"="The Price Model", "Minimum Mean"=min(knn_result2$`Mean_RMSE1`), 
+                                    "K"=knn_result2$`K`[knn_result2$`Mean_RMSE1`==min(knn_result2$`Mean_RMSE1`)])
+MinimumMean= data.table::data.table("Models"="The House Value Model","Minimum Mean"=min(knn_result2$`Mean_RMSE`), 
+                                    "K"=knn_result2$`K`[knn_result2$`Mean_RMSE`==min(knn_result2$`Mean_RMSE`)])
+c=rbind(MinimumMean1, MinimumMean)
+
+kable(c, caption = "**Table 1.7 Minimum RMSE and Corresponding K**")
+
+ggplot(data=knn_result2)+
+  geom_line(aes(x=K, y=Mean_RMSE1), color="blue", size=1)+
+  geom_point(aes(x=knn_result2$`K`[knn_result2$`Mean_RMSE1`==min(knn_result2$`Mean_RMSE1`)], 
+                 y=min(knn_result2$`Mean_RMSE1`)), color="red", size=3)+
+  labs(title = "Graph 1.1 Average RMSE of K Values For the Price Model", y="RMSE")+
+  theme_bw()+
+  theme(plot.title = element_text(hjust = 0.5))+
+  scale_x_discrete(limit = c(knn_result2$`K`[knn_result2$`Mean_RMSE1`==min(knn_result2$`Mean_RMSE1`)],  
+                                10,  20,  30, 40, 50))+
+  geom_vline(xintercept=knn_result2$`K`[knn_result2$`Mean_RMSE1`==min(knn_result2$`Mean_RMSE1`)], 
+             linetype="dotted", size=1)
+
+ggplot(data=knn_result2)+
+  geom_line(aes(x=K, y=Mean_RMSE), color="blue", size=1)+
+  geom_point(aes(x=knn_result2$`K`[knn_result2$`Mean_RMSE`==min(knn_result2$`Mean_RMSE`)], 
+                 y=min(knn_result2$`Mean_RMSE`)), color="red", size=3)+
+  labs(title = "Graph 1.2 Average RMSE of K Values For the House Value Model", y="RMSE")+
+  theme_bw()+
+  theme(plot.title = element_text(hjust = 0.5))+
+  scale_x_discrete(limit = c(knn_result2$`K`[knn_result2$`Mean_RMSE`==min(knn_result2$`Mean_RMSE`)],  
+                                10,  20,  30, 40, 50))+
+  geom_vline(xintercept=knn_result2$`K`[knn_result2$`Mean_RMSE`==min(knn_result2$`Mean_RMSE`)], 
+             linetype="dotted", size=1)
+```
+
+Based on above table and graph, we can conclude: first, house value KNN model has a lower "lowest average out-of-sample RMSE". So similar to the case of the linear model, house value also performs better as a target variable in KNN regression. Second, compared to linear models with the price as the target variable, the price KNN regression has a lower minimum average out-of-sample RMSE for some K values. However, compared to linear models with the house value as the target variable, house value KNN doesn't perform better since its minimum average out-of-sample is usually higher than that of the linear model. Therefore, based on the RMSE as a measurement of the model performance in predicting house prices, linear model is a better choice if the target variable is a house value, while the KNN regression is better if the target value is the price. Generally, from the perspectives of a lower RMSE than the "medium" model's RMSE, this report suggests using House Value Model 1 to predict the market values of properties. We recommend House Value Model 1 because this model is more parsimonious and more reasonable than House Value Model 2, even though House Value Model 2 has a slightly lower average RMSE. 
