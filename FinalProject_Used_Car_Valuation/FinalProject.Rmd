@@ -1,0 +1,841 @@
+---
+title: "Using Statistical Learning Models to Predict Listed Prices of Used Cars"
+output: pdf_document
+---
+
+
+```{r setup, include=FALSE}
+data <- read.csv("https://raw.githubusercontent.com/zhenghao-li/Data_Mining/master/Data/X1.csv")
+library(tidyverse)
+library(mosaic)
+library(MASS) 
+library(tidyverse)
+library(FNN)
+library(dplyr)
+library(ggplot2)
+library(foreach)
+library(gridExtra)
+library(lubridate)
+library(kableExtra)
+library(knitr)
+library(GGally)
+library(scales)
+library(forcats)
+library(corrplot)
+library(data.table)
+library(sjPlot)
+library(sjmisc)
+library(sjlabelled)
+library(randomForest)
+library(jtools)
+library (gbm)
+library(gamlr)
+library(pdp)
+library(stringr)
+library(gamlr)
+library(grid)
+options(scipen = 999)
+
+data$make <- as.factor(data$make)
+data$car_type <- as.factor(data$car_type)
+data$car_size <- as.factor(data$car_size)
+data$made_in <- as.factor(data$made_in)
+data$Fuel_Engine <- as.factor(data$Fuel_Engine)
+data$transmission.type <- as.factor(data$transmission.type)
+data$transmission.speed <- as.factor(data$transmission.speed)
+data$drivetrain_ad <- as.factor(data$drivetrain_ad)
+data$drivetrain_ad2 <- as.factor(data$drivetrain_ad2)
+```
+
+\section{Abstract} 
+
+Constructing accurate statistical models to predict used car prices has been of high interest in numerous fields. Determining the resale value of a vehicle has been of a paramount importance for financial services, lenders and vehicle leasing services. This report examines number of distinct car specifications, that are considered to affect vehicle prices the most. To construct an accurate statistical model aimed at predicting used vehicle prices, four statistical techniques are applied: Multiple Linear Regression Analysis, Lasso, Random Forest and Boosting. The predictions are then examined and compared to decide which model provides the best performance. The report concludes with analysis of particular vehicle specifications, specifically fuel type, to examine and approximate their effect on used vehicle prices.  
+
+&nbsp;
+
+
+
+\section{Introduction} 
+
+Currently, there are about 287.3 million registered cars in The United States. In addition, the dollar value of annual sales of cars is usually from 3 to 3.5 percent of GDP. The report aims at examining what car characteristics are the most important in predicting listed prices. However, the motivation to explore this topic is probably less academic, but more rooted in our experience of suspicious listed car prices found online. Therefore, if one has a well-trained price-predictive model to be referred to, it will be more assuring even when buying cars from a lemon market.
+
+Since previous and current research has shown that those specifications like make, year, mileage, type, size, and other dimensions are probably important to predict prices, our analysis also follows this approach but uses different statistical learning models to figure out the complexity hidden behind those specifications. By doing so, it is more likely to get models performing better in predicting prices. However, car prices prediction is not an easy task, though a popular topic, which requires some expertise and special knowledge as well as more complete data. Hence, this analysis is just a starting point from which many improvements can be done such as pre-processing data with a more professional understanding of cars, compiling more data across the nation, or adding information about both supply sides and demand sides of cars to adjust prices.  
+
+The rest of this report is organized as follows: Section 1 presents visual illustrations of the dataset, section 2 briefs the dataset and the methods/models used. Section 3 presents and discusses the main results of our models, and section 4 summarizes the main conclusions of our report. In the Appendix, some relatively less crucial but important tables and figures are listed to be viewed.  
+
+&nbsp;
+
+
+\section{Section 1: Visual Illustration of the Dataset}
+
+
+The top panel of the figure 1.1. illustrates that the majority of the car types in the data are presented by Sport Utility Vehicles, sedans and pickup trucks. The bottom panel shows that each type has a relatively distinctive price range. For example, pickup trucks as a type have the  average price of about 17 thousand dollars, which is the highest among all types, whereas the average SUV costs 13 thousand dollars. Hatchbacks and wagons as a type have the relatively lowest average price of about 10 thousand dollars. 
+
+&nbsp;
+
+
+```{r Figure 1. boxplots, echo = FALSE, warning=FALSE}
+data <- read.csv('https://raw.githubusercontent.com/zhenghao-li/Data_Mining/master/Data/X1.csv')
+data$make <- as.factor(data$make)
+data$car_type <- as.factor(data$car_type)
+data$car_size <- as.factor(data$car_size)
+data$made_in <- as.factor(data$made_in)
+data$Fuel_Engine <- as.factor(data$Fuel_Engine)
+data$transmission.type <- as.factor(data$transmission.type)
+data$transmission.speed <- as.factor(data$transmission.speed)
+data$drivetrain_ad <- as.factor(data$drivetrain_ad)
+data$drivetrain_ad2 <- as.factor(data$drivetrain_ad2)
+#grid of types and prices
+type_price<-ggplot(data, aes(x=reorder(car_type, -price), y=price)) +
+  geom_boxplot(outlier.shape = NA)+
+  scale_y_continuous(limits = quantile(data$price, c(0.1, 0.9)))+
+  labs(x = "car type", 
+       y = "price")+
+  scale_x_discrete(labels = c("Pickup Truck","Coupe","Convertible", "Utility", "Sedan", "Van/SUV", "Hatchback", "Wagon"))
+hist_types <- ggplot(data)+
+  geom_bar(aes(x = car_type, binwidth = 1))+
+  scale_x_discrete(labels = c("Pickup Truck","Coupe","Convertible", "Utility", "Sedan", "Van/SUV", "Hatchback", "Wagon"))
+grid.arrange(hist_types, type_price,  nrow = 2, top = "Figure 1.1: Top: Distribution of car types.  Bottom: Boxplots of car prices by type")
+```
+
+&nbsp;
+
+
+
+Table 1.1 in the appendix represents all the 47 car models in the dataset. One of the goals in the paper is to find how much the type of the engine, and the fuel it supports, affect the value of the car. This is the reason why Figure 1.2 illustrates the different types of engine fuels that the models have in our dataset. Hence, the graphs below visually illustrate the relationship between listed price, vehicle models and engine fuel types.
+
+Results from the graphs also indicate the current situation in the car industry: even though electric and hybrid vehicles are becoming more popular, there is still a large prevalence of regular vehicles. The internal combustion engine vehicles that are powered mainly by gas prevail in the dataset used. 
+
+The vehicle models that also have both regular engine type fuel and hybrid/electric type are Audi, BMW, Buick, Cadillac, Chevrolet, Ford, GMC, Honda, Hyundai, Infiniti, Kia, Lexus, Lincoln, Mercedes-Benz, Mercury, Nissan, Porsche, Saturn, Smart, Subaru, Toyota, Volkswagen. However, the graph illustrates only these models that have the highest number of hybrid or electric vehicles to visually represent and analyze the price given engine type. The five models represented are BMW, Honda, Lexus, Nissan and Toyota.
+
+Figure 1.2 represents a grid of five graphs to show the relationship between listed prices, vehicle models and engine types. The engine types here have been further grouped into Hybrid, Electric and Traditional. All engine fuel types beside hybrid and electric have been combined into Traditional to represent the regular type of vehicles. Even though Ford and Chevrolet have high amount of hybrid and electric vehicles, the regular type of engines exceed the hybrid and electric by so much that the visual representation is ambiguous, and these two models are excluded. The rest of the five vehicles models also have the potential to well represent the relationship between listed price and engine type since all five have high amount of electric and hybrid vehicles.
+
+&nbsp;
+
+
+```{r setup 1.1.5 grid, warning=FALSE, echo=FALSE, fig.width=18, fig.height=11.5}
+DataFinalProject_Final <- read.csv("https://raw.githubusercontent.com/zhenghao-li/Data_Mining/master/Data/DataFinalProject_Final.csv")
+data$make <- as.factor(data$make)
+data$car_type <- as.factor(data$car_type)
+data$car_size <- as.factor(data$car_size)
+data$made_in <- as.factor(data$made_in)
+data$Fuel_Engine <- as.factor(data$Fuel_Engine)
+data$transmission.type <- as.factor(data$transmission.type)
+data$transmission.speed <- as.factor(data$transmission.speed)
+data$drivetrain_ad <- as.factor(data$drivetrain_ad)
+data$drivetrain_ad2 <- as.factor(data$drivetrain_ad2)
+
+ BMW <- data.frame(filter(DataFinalProject_Final, DataFinalProject_Final$attributes.make == "BMW"))
+ Chevrolet <- data.frame(filter(DataFinalProject_Final, DataFinalProject_Final$attributes.make == "Chevrolet"))
+ Ford <- data.frame(filter(DataFinalProject_Final, DataFinalProject_Final$attributes.make == "Ford"))
+ Honda <- data.frame(filter(DataFinalProject_Final, DataFinalProject_Final$attributes.make == "Honda"))
+ Lexus <- data.frame(filter(DataFinalProject_Final, DataFinalProject_Final$attributes.make == "Lexus"))
+ Nissan <- data.frame(filter(DataFinalProject_Final, DataFinalProject_Final$attributes.make == "Nissan"))
+ Toyota <- data.frame(filter(DataFinalProject_Final, DataFinalProject_Final$attributes.make == "Toyota"))
+ 
+ P1 <- ggplot( BMW, aes( x = odometer, y = price ))  +
+   geom_point( aes( color = TypeEngine2), shape = 19 ) +
+   ggtitle("BMW: Listed Price by Odometer and Engine Type") +
+   theme(plot.title = element_text(hjust = 0.5), text = element_text(size=15)) +
+   scale_color_manual(values=c("red", "blue", "green")) +
+   labs(x="Odometer(miles)", y = "Listed $Price", color = "Engine Type")
+ 
+ P2 <- ggplot( Chevrolet, aes( x = odometer, y = price ))  +
+   geom_point( aes( color = TypeEngine2), shape = 19 ) +
+   ggtitle("Chevrolet: Listed Price by Odometer and Engine Type") +
+   theme(plot.title = element_text(hjust = 0.5), text = element_text(size=15)) +
+   scale_color_manual(values=c("red", "blue", "green")) +
+   labs(x="Odometer(miles)", y = "Listed $Price", color = "Engine Type")
+ 
+ P3 <- ggplot( Ford, aes( x = odometer, y = price ))  +
+   geom_point( aes( color = TypeEngine2), shape = 19 ) +
+   ggtitle("Ford: Listed Price by Odometer and Engine Type") +
+   theme(plot.title = element_text(hjust = 0.5), text = element_text(size=15)) +
+   scale_color_manual(values=c("red", "blue", "green")) +
+   labs(x="Odometer(miles)", y = "Listed $Price", color = "Engine Type")
+ 
+ P4 <- ggplot( Honda, aes( x = odometer, y = price ))  +
+   geom_point( aes( color = TypeEngine2), shape = 19 ) +
+   ggtitle("Honda: Listed Price by Odometer and Engine Type") +
+   theme(plot.title = element_text(hjust = 0.5), text = element_text(size=15)) +
+   scale_color_manual(values=c("red", "blue", "green")) +
+   labs(x="Odometer(miles)", y = "Listed $Price", color = "Engine Type")
+ 
+ P5 <- ggplot( Lexus, aes( x = odometer, y = price ))  +
+   geom_point( aes( color = TypeEngine2), shape = 19 ) +
+   ggtitle("Lexus: Listed Price by Odometer and Engine Type") +
+   theme(plot.title = element_text(hjust = 0.5), text = element_text(size=15)) +
+   scale_color_manual(values=c("red", "blue", "green")) +
+   labs(x="Odometer(miles)", y = "Listed $Price", color = "Engine Type")
+ 
+ P6 <- ggplot( Nissan, aes( x = odometer, y = price ))  +
+   geom_point( aes( color = TypeEngine2), shape = 19 ) +
+   ggtitle("Nissan: Listed Price by Odometer and Engine Type") +
+   theme(plot.title = element_text(hjust = 0.5), text = element_text(size=15)) +
+   scale_color_manual(values=c("red", "blue", "green")) +
+   labs(x="Odometer(miles)", y = "Listed $Price", color = "Engine Type")
+ 
+ P7 <- ggplot( Toyota, aes( x = odometer, y = price ))  +
+   geom_point( aes( color = TypeEngine2), shape = 19 ) +
+   ggtitle("Toyota: Listed Price by Odometer and Engine Type") +
+   theme(plot.title = element_text(hjust = 0.5), text = element_text(size=15)) +
+   scale_color_manual(values=c("red", "blue", "green")) +
+   labs(x="Odometer(miles)", y = "Listed $Price", color = "Engine Type")
+ 
+ 
+ grid.arrange(
+   P1, P4, P5, P6, P7,
+   nrow = 3,
+      top = textGrob("Figure 1.2: Five Model Cars and Their Listed Prices By Odometer and Engine Type", 
+                  hjust = 0.5, gp=gpar(fontsize=17), vjust = 0.1)
+ )
+ 
+```
+
+&nbsp;
+
+
+Figure 1.2 illustrates an expected relationship about the listed price and odometer: as the vehicle has more miles on it, the price decreases, regardless of model type and engine type. However, the graphs do not show any distinctive relationship between the prices of traditional vehicles compared to hybrid and electric vehicles. Considering Honda, Lexus, and Nissan, it can be concluded whether hybrid and electric vehicles have higher price on average by concentrating only in a particular range of odometer values. On the other hand, if we focus on the lower range of odometer: between 0 and 50000 for BMW, we can see that we can expect higher price of BMW hybrid vehicles compared to electric and traditional. Looking at the Toyota vehicles, we see the opposite relationship than what is illustrated at the BMW graph. 
+
+Analyzing these five graphs above, we keep in mind that we do not account for any other features of the vehicles other than odometer and engine type. The listed prices of cars are affected by many other vehicle characteristics such as car model, color, size, year, and other attributes. 
+
+
+&nbsp;
+
+
+\section{Section 2: Data Methodology}
+
+The dataset used for estimate is an assembled one, joined from CarsXE and Craiglist based on unique VIN number. The Craiglist dataset was downloaded from the Kaggle platform (https://www.kaggle.com/austinreese/craigslist-carstrucks-data). However, this dataset has some caveats: many missing values, too few specifications of cars, and some values are inaccurate. To overcome these limitations, only valid vin numbers are extracted, which serve as the unique identity of a car, from the original dataset. Afterwards, these vin numbers are used to extract full specifications of cars from CarsXE (https://api.carsxe.com/), a database of cars with API access. After removing duplications and extreme values, a subsample in a size of approximately 24,000 cars was drawn to do our analysis. 
+
+The cars data set is specifically tailored towards the southwest region in US, as to avoid different economic, policy factors affect the listed prices. The listed prices are as of January 2020 and posting made no later than a month prior to January 2020 as to avoid economic, political events that may have occurred in time that would affect demand/supply and oil prices. 
+
+After data cleaning and manipulation the following variables are used for the analysis that follows. The car size, car type, transmission speed and type, drivetrain and fuel engine have been manipulated in a way to reduce the levels of the categorical variables.
+
+  * Price: listed price of a car as of January, 2020 
+  * Make: brand of the vehicle
+  * car_type: types of cars by body styles
+  * car_size: vehicle size classes
+  * made_in: country manufactured
+  * Fuel_Engine: type of fuel used for car
+  * fuel_capacity: fuel tank capacity measure in US gallons
+  * engine_size: The size of an engine measured in cubic centimetres (cc)
+  * engine_cylinders: number of engine cylinders
+  * transmission_type: type of transmission
+  * transmission.speed: number of speeds of transmission
+  * drivetrain_ad2: type of a drivetrain
+  * car_door: number of doors in car
+  * curb_weight: total mass of a car without passengers and cargo
+  * overall_height: the vertical dimension from the highest point on the car to ground
+  * overall_length: the maximum dimension measured longitudinally between the foremost point and the         rearmost point on the vehicle
+  * overall_width: the maximum dimension measured between the widest points on the vehicle, excluding        exterior mirrors
+  * wheelbase_length: the dimension measured longitudinally between front and rear wheel centerlines
+  * standard_seating: number of designated seating positions
+  * odometer: distance travelled by vehicle measured in miles
+  * mileage_range: indicator for the range of distance travelled by vehicle in miles
+  * city_mileage: miles travelled per gallon in the city
+  * highway_mileage: miles travelled per gallon in the highways
+  * avg.mileage: average of city mileage and highway mileage.
+
+&nbsp;
+
+
+\section{Section 3: Statistical Models}
+
+The first model is the baseline model, a hand-built linear regression model including some interactions. The second model presented is Lasso model which includes all interactions. The main aim of Lasso model is for variable selection, to select these features with nonzero estimates of coefficients. This gives us a better understanding of variable interactions and their effects on the car prices. The other two methods to be used are two tree-based: boosting and random forest, which tend to capture potential interactions and non-linearity better as well as fit with a dataset with many categorical variables. At last all above methods are measured by cross validation and are compared by their error rates (averaged RMSE).
+
+&nbsp;
+
+
+\section{Section 3.1: Linear Regression Models}
+
+Before hand-building a linear regression model, a stepwise selection method was applied to our data. Without any interactions, the stepwise selection just returned a linear model including all features. Once interactions included in the stepwise selection, it became time-consuming and cumbersome in running. Moreover, through a simple 90:10 training and testing splititng, the performance of hand-built model was better than the setpwise selection model. So, the hand-built model is used as the baseline model. In addition, since including a few interactions improved the model performance, it is expected the interactions would play an important role in prediction. However, instead of checking features and their interactions in the baseline model, lasso regression is used instead, which deals with interactions much more efficiently.
+
+&nbsp;
+
+
+```{r lmmodelcoef, results="hide", include=TRUE, echo = FALSE, warning=FALSE}
+data <- read.csv("https://raw.githubusercontent.com/zhenghao-li/Data_Mining/master/Data/X1.csv")
+data$make <- as.factor(data$make)
+data$car_type <- as.factor(data$car_type)
+data$car_size <- as.factor(data$car_size)
+data$made_in <- as.factor(data$made_in)
+data$Fuel_Engine <- as.factor(data$Fuel_Engine)
+data$transmission.type <- as.factor(data$transmission.type)
+data$transmission.speed <- as.factor(data$transmission.speed)
+data$drivetrain_ad <- as.factor(data$drivetrain_ad)
+data$drivetrain_ad2 <- as.factor(data$drivetrain_ad2)
+
+data<- data[!as.numeric(data$make) %in% which(table(data$make)<20),]
+data$mileage_range = cut(data$odometer, c(0,25000,50000,75000,100000,125000,150000,200000,250000,Inf),
+                         labels = c("<25000", "25000-50000","50000-75000","75000-100000",
+                                    "100000-125000","125000-150000","150000-200000","200000-250000",">250000"))
+#lm_data <-subset(data, select = c(price, year_factor, make, car_type, car_size,
+ #                                 made_in, fuel_capacity, engine_size, 
+  #                                engine_cylinders, transmission.type, 
+   #                               transmission.speed, drivetrain_ad2, car_door,
+    #                              curb_weight, overall_length, overall_width,
+     #                             standard_seating, Fuel_Engine,
+      #                            odometer,   mileage_range))
+lm0 = lm(price ~ 1, data=data)
+lm_both = step(lm0, direction='both', scope=~(make + car_type + car_size + made_in + Fuel_Engine + fuel_capacity
+                                             + engine_size + engine_cylinders + transmission.type + transmission.speed +
+                                               drivetrain_ad2 + car_door + curb_weight + overall_height + overall_length +
+                                               overall_width + wheelbase_length + standard_seating + odometer + year_factor))
+lm_data <- data[,colnames(data) %in% c("price", "year_factor",
+                                       "make","car_type", "car_size",
+                                "made_in", "fuel_capacity", "engine_size", 
+                                  "engine_cylinders","transmission.type", 
+                                 "transmission.speed", "drivetrain_ad2", "car_door",
+                                "curb_weight", "overall_length", "overall_width",
+                               "standard_seating", "Fuel_Engine", 
+                              "odometer", "mileage_range")]
+lm_data$year_factor = as.factor(lm_data$year_factor)
+lm_data_no_na <- na.omit(lm_data)
+lm_hand = lm(price ~ year_factor+ make+  car_type+ car_size+  made_in+ fuel_capacity+engine_size+ 
+                                  engine_cylinders+ transmission.type+ 
+                                  transmission.speed+ drivetrain_ad2+ car_door+
+                                  curb_weight+ overall_length+ overall_width+
+                                  standard_seating+ Fuel_Engine + 
+                                     mileage_range +car_type*car_size  + 
+                                + year_factor*car_type + car_type*transmission.type, data=lm_data_no_na)
+ss <- coef(summary(lm_hand))
+ss_sig <- ss[ss[,"Pr(>|t|)"]<0.001,]
+printCoefmat(ss_sig, digits = 2)
+coeff = as.data.frame(printCoefmat(ss_sig))
+coeff1 = coeff[,!colnames(coeff) %in% c("Std. Errors")]
+coeff1$Estimate = round(coeff1$Estimate, digits = 2)
+```
+
+&nbsp;
+
+
+Table 3.2.1 in the appendix gives hand-built linear model's estimated coefficients of the various car features in predicting listed prices  that are statistically significant at 0.1%. Each coefficient shows a ceteris paribus effect of every feature on car prices. For example, as might be expected, coefficients on year show that as cars get older, the estimates on year decrease holding other car features constant. Estimates on makes reveal interesting facts about some cars: make Porcshe is associated with about \$13500 price increase from the base level of make Acura holding other features constant, whereas make of Ram - with the lowest price decrease of about \$2200. In general, it can be noticed that cars' listed prices tend to increase with the fuel capacity, engine size and cylinders, and as cars mileage travelled increases, their listed prices tend to decrease non-linearly. Having large-sized vehicle independently on the type tends to have very negative effect on the listed price, whereas having midsize sedans and wagons have positive effects. Interestingly, in can be noted, despite being relatively old vehicles, certain types like hatchback, sedan and wagon tend to have higher prices, holding other features constant. In the case of wagons, we can even see that older ones tend to have higher prices. Lastly, consistent with the graphs before, our estimates show that on average, having electric car is associated with a \$6000 increase in price holding other vehicle features constant.
+
+&nbsp;
+
+
+\section{Section 3.2: Lasso Model}
+
+To perform Lasso regression, the data is scaled first. The model is ran based on the “poisson” distribution which not only resembled the non-parametric distribution of price but also gave us a slightly lower error rate compared to “guassian”. A cross-validation is performed and Residual Sum of Squares is computed for each lambda. 
+
+Following the default rule, lambda.1se is chosen instead of the minimum lambda in prediction, since such lambda is likely to lead to a more parsimonious model. The lamda.1se prepresents lambda within 1 standard error from the optimal lambda. By comparing the results of lambda.1se and lambda.min, no significant difference in estimated coefficients or error rates is presented between them.
+
+By performing Lasso Regression, it can be observed that interactions do have impact on predicted used vehicle prices. Without including any interactions, the Lasso gave 64 nonzero coefficient estimates out of 101 coefficients, implying about two thirds of our variables had predictive power. However, after including interaction, only 259 out of 4117 variables/interactions had nonzero estimates, and the coefficient estimates of most single variables turned to zeros. The Table 3.2.1 listed top 20 variables/interactions impacting prices (ordered by the absolute values of estimates and excluded the intercept).
+
+&nbsp;
+
+
+```{r setup lasso coefficients, echo = FALSE, warning=FALSE}
+X1 <- read.csv('https://raw.githubusercontent.com/zhenghao-li/Data_Mining/master/Data/X1.csv')[,-1]
+
+X1$make <- as.factor(X1$make)
+X1$car_type <- as.factor(X1$car_type)
+X1$car_size <- as.factor(X1$car_size)
+X1$made_in <- as.factor(X1$made_in)
+X1$Fuel_Engine <- as.factor(X1$Fuel_Engine)
+X1$transmission.type <- as.factor(X1$transmission.type)
+X1$transmission.speed <- as.factor(X1$transmission.speed)
+X1$drivetrain_ad <- as.factor(X1$drivetrain_ad)
+X1$drivetrain_ad2 <- as.factor(X1$drivetrain_ad2)
+
+X1$car_door=as.factor(X1$car_door)
+set.seed(777)
+rows=sample(nrow(X1))
+X1=X1[rows,]
+Xlasso1=model.matrix(price ~ . , data=X1)[,-1]
+Ylasso=X1$price
+lasso1=gamlr(Xlasso1, Ylasso, scale=TRUE, family = "poisson")
+nonzero=sum(coef(lasso1)!=0)
+zero=sum(coef(lasso1)==0)
+Xlasso=model.matrix(price ~ .^2 , data=X1)[,-1]
+lasso2=gamlr(Xlasso, Ylasso, scale=TRUE, family = "poisson")
+nonzero=sum(coef(lasso2)!=0)
+zero=sum(coef(lasso2)==0)
+coef=coef(lasso2) %>% round(4) %>% drop
+coef_table=data.frame(as.table(coef))
+coef_table=as.data.table(coef_table)
+colnames(coef_table)=c("Variable/Interaction", "Coefficient")
+coef_table1=filter(coef_table, Coefficient !=0)
+coef_table1$Coefficient2=abs(coef_table1$Coefficient)
+coef_table1=coef_table1[order(-coef_table1$Coefficient2),c(1,2)] %>% head(21)
+coef_table1=coef_table1[-1, ]
+rownames(coef_table1)=NULL
+Kable = kable(coef_table1)
+add_header_above(Kable, "Table 3.2.1 Most Important Lasso Selection Variables")
+```
+
+&nbsp;
+
+
+In Table 3.2.1, all are interactions, which strongly implied us the existence of complicatedly interactive and non-linear relations among those variables. Moreover, after including interactions, the error rates of Lasso improved a lot, as shown by Table 3.2.2 below.
+
+&nbsp;
+
+
+```{r setup lasso rmse compare, echo = FALSE, warning=FALSE}
+X1 <- read.csv('https://raw.githubusercontent.com/zhenghao-li/Data_Mining/master/Data/X1.csv')[,-1]
+
+X1$make <- as.factor(X1$make)
+X1$car_type <- as.factor(X1$car_type)
+X1$car_size <- as.factor(X1$car_size)
+X1$made_in <- as.factor(X1$made_in)
+X1$Fuel_Engine <- as.factor(X1$Fuel_Engine)
+X1$transmission.type <- as.factor(X1$transmission.type)
+X1$transmission.speed <- as.factor(X1$transmission.speed)
+X1$drivetrain_ad <- as.factor(X1$drivetrain_ad)
+X1$drivetrain_ad2 <- as.factor(X1$drivetrain_ad2)
+
+X1$car_door=as.factor(X1$car_door)
+rmse = function(y, yhat) {
+  sqrt( mean( (y - yhat)^2 ) )}
+set.seed(777)
+rows=sample(nrow(X1))
+X1=X1[rows,]
+La=data.frame()
+N=nrow(X1)
+M=2700
+max=N-M
+t0=Sys.time()
+for(i in seq(1, nrow(X1), by=M)) {
+  if (i<max){
+    X1_train = X1[-c(seq(i, i+M-1, by=1)),]
+    X1_test = X1[c(seq(i, i+M-1, by=1)),]
+    
+    X1lasso=model.matrix(price ~ ., data=X1)[,-1]
+    X1lasso_train=X1lasso[-c(seq(i, i+M-1, by=1)),]
+    Y1lasso_train=X1_train$price
+    
+    X1lasso_test=X1lasso[c(seq(i, i+M-1, by=1)),]
+    Y1lasso_test=X1$price[c(seq(i, i+M-1, by=1))]
+    
+    X2lasso  =model.matrix(price ~ .^2 , data=X1)[,-1]
+    X2lasso_train=X2lasso[-c(seq(i, i+M-1, by=1)),]
+    
+    X2lasso_test=X2lasso[c(seq(i, i+M-1, by=1)),]
+    
+    lasso=gamlr(X1lasso_train, Y1lasso_train, scale=TRUE, family = "poisson")
+    lasso1=gamlr(X2lasso_train, Y1lasso_train, scale=TRUE, family = "poisson")
+    
+    yhat_test_lasso = predict(lasso, X1lasso_test, type="response", select = lasso$lambda.1se)
+    yhat_test_lasso1 = predict(lasso1, X2lasso_test, type="response", select = lasso$lambda.1se)
+    
+    result=c( "rmse_lasso" = rmse(Y1lasso_test, yhat_test_lasso),
+             "rmse_lasso1" = rmse(Y1lasso_test, yhat_test_lasso1))
+    
+    La=rbind(La, result)
+  }
+  else {  X1_train = X1[-c(seq(i, nrow(X1), by=1)),]
+  X1_test = X1[c(seq(i, nrow(X1), by=1)),]
+  
+  X1lasso=model.matrix(price ~ . , data=X1)[,-1]
+  X1lasso_train=X1lasso[-c(seq(i, nrow(X1), by=1)),]
+  Y1lasso_train=X1_train$price
+  
+  X1lasso_test=X1lasso[c(seq(i, nrow(X1), by=1)),]
+  Y1lasso_test=X1$price[c(seq(i,  nrow(X1), by=1))]
+  
+  X2lasso  =model.matrix(price ~ .^2 , data=X1)[,-1]
+  X2lasso_train=X2lasso[-c(seq(i,  nrow(X1), by=1)),]
+  
+  X2lasso_test=X2lasso[c(seq(i, nrow(X1), by=1)),]
+  
+  lasso=gamlr(X1lasso_train, Y1lasso_train, scale=TRUE, family = "poisson")
+  lasso1=gamlr(X2lasso_train, Y1lasso_train, scale=TRUE, family = "poisson")
+  
+  yhat_test_lasso = predict(lasso, X1lasso_test, type="response", select = lasso$lambda.1se)
+  yhat_test_lasso1 = predict(lasso1, X2lasso_test, type="response", select = lasso$lambda.1se)
+  
+  result=c( "rmse_lasso" = rmse(Y1lasso_test, yhat_test_lasso),
+            "rmse_lasso1" = rmse(Y1lasso_test, yhat_test_lasso1))
+  
+  La=rbind(La, result)
+  }
+}
+colnames(La)=c("rmse_lasso","rmse_lasso1")
+La_mean=c("Without Interaction"=mean(La$rmse_lasso),"With Interaction"=mean(La$rmse_lasso1))
+Kable = kable(La_mean)
+add_header_above(Kable, "Table 3.2.2: Error Rates of Lasso With and Without Interactions")
+```
+
+
+&nbsp;
+
+
+
+
+Sections 3.3 and 3.4 present two decision tree based models: Random Forest and Boosting. Considering Lasso variable selection ,previous knowledge and reasoning, total of 23 independent variables have been used to train the models. The distinct car specifications used as explanatory variables are make, vehicle type, size, country manufactured, engine fuel, fuel capacity, city and highway mileage, steering type, wheelbase length, seating, transmission type, types of drivetrain, odometer, year manufactured, engine size, engine cylinders, and so on. The vehicle prices are as of January 2020 as well as all other car attributes including odometer mileage. 
+
+&nbsp;
+
+
+\section{Section 3.3: Random Forest}
+
+The third statistical model performed is Random Forest. The decision trees built from bootstrapped training sets are 200 and a random sample of 4 explanatory variables are chosen as split candidates from the total number of predictors. The use of averaging the predictions of each of the resulting regression trees is designed to improve the predictive accuracy and control over-fitting. Since each split uses only 1 of these 4 variables, a sample of 4 predictors is taken at each split. In this way, Random Forest also overcomes the problem of highly correlated predictions from the 200 regression trees. 
+
+The data has been split in 90% train set and 10% test set. The RMSE result on average is below 3000 and the percent of variables explained is 88.3%. Given the RMSE, the Random Forest model can be considered of sufficient accuracy. 
+
+Table 3.3.1 illustrates the variable importance of each predictor. Running Random Forest, it can be recorded the amount by which Mean Squared Error (MSE) increases if the variable of interest is omitted from the model. In addition, the variable importance analysis shows the increase in node purity that results from splits over that variable. The increase in node purity reported is averaged over all trees. In this Random Forest model, the most important variables, based on percent increased MSE, are odometer, year manufactured and make. Considering increase in node purity, the most important variables are again odometer and year manufactured. 
+
+&nbsp;
+
+
+```{r setup 1, warning=FALSE, echo=FALSE}
+data <- read.csv("https://raw.githubusercontent.com/zhenghao-li/Data_Mining/master/Data/X1.csv")
+data$make <- as.factor(data$make)
+data$car_type <- as.factor(data$car_type)
+data$car_size <- as.factor(data$car_size)
+data$made_in <- as.factor(data$made_in)
+data$Fuel_Engine <- as.factor(data$Fuel_Engine)
+data$transmission.type <- as.factor(data$transmission.type)
+data$transmission.speed <- as.factor(data$transmission.speed)
+data$drivetrain_ad <- as.factor(data$drivetrain_ad)
+data$drivetrain_ad2 <- as.factor(data$drivetrain_ad2)
+
+data$year_factor <- as.factor(data$year_factor)
+data <- na.omit(data)
+data$engine_size <- round(data$engine_size, 0)
+n = nrow(data)
+n_train = round(0.9*n)  # round to nearest integer
+n_test = n - n_train
+train_cases = sample.int(n, n_train, replace=FALSE)
+test_cases = setdiff(1:n, train_cases) 
+car_train = data[train_cases,]
+car_test = data[test_cases,]
+###RandomForest####
+set.seed(1)
+CarsRandomForest <- randomForest(price ~ make + car_type + car_size + made_in + Fuel_Engine + fuel_capacity + highway_mileage +
+                                  city_mileage + engine_size + wheelbase_length +
+                                  standard_seating + transmission.type + transmission.speed + drivetrain_ad +
+                                  drivetrain_ad2 + car_door + curb_weight + 
+                                  odometer + year_factor + engine_cylinders, 
+                                  data = car_train, mtry=4, ntree=300, importance= TRUE)
+VariableImp = as.data.table(importance(CarsRandomForest), keep.rownames = TRUE)
+Kable = kable(VariableImp)
+add_header_above(Kable, "Table 3.3.1 Variable Importance in the Random Forest Model")
+```
+
+&nbsp;
+
+
+Figure 1.3 illustrates the prediction accuracy of the Random Forest model. The y axis represents the actual price of the test set and x axis represents the predicted price. It can be interpreted that most of the predicted values are close to the actual values of the test set. 
+
+&nbsp;
+
+
+```{r setup 2, warning=FALSE, echo=FALSE}
+data <- read.csv("https://raw.githubusercontent.com/zhenghao-li/Data_Mining/master/Data/X1.csv")
+
+data$make <- as.factor(data$make)
+data$car_type <- as.factor(data$car_type)
+data$car_size <- as.factor(data$car_size)
+data$made_in <- as.factor(data$made_in)
+data$Fuel_Engine <- as.factor(data$Fuel_Engine)
+data$transmission.type <- as.factor(data$transmission.type)
+data$transmission.speed <- as.factor(data$transmission.speed)
+data$drivetrain_ad <- as.factor(data$drivetrain_ad)
+data$drivetrain_ad2 <- as.factor(data$drivetrain_ad2)
+
+yhat_randomForest = predict(CarsRandomForest, newdata = car_test)
+plot(yhat_randomForest, car_test$price, 
+     xlab = "Predicted Values for Price: Random Forest", ylab = "Price")
+title("Figure 1.3: Random Forest Predicted Values of Price and\n Actual Price Values")
+```
+
+&nbsp;
+
+
+Applying the Random Forest model, it can be examined how on average price will change if cars fall in different categories such as models, engine, and fuel type. Given the difficulty of interpreting results from Random Forest, the method applied here and on the rest of prediction analysis is to predict prices on all cars that fall under a specific category or multiple categories and compute the average of these predicted prices. The limitation of this approach is that not all the variables are accounted for, hence, conclusions of the exact effect of a specific category cannot be determined. A solution to this caveat can be to specify as many as possible variables such as model, year, fuel and engine type and range of odometer.
+
+For instance, the average predicted price of a car that has an engine that supports regular unleaded gas is approximately \$11887 while the average predicted price of a car that is Electric is approximately \$14408. This is a very rough approximations since important car specifications among vehicles are different. 
+
+Being more specific in categories, if a vehicle is a 2013 Chevrolet model, using regular unleaded gas, then the average predicted price is approximately \$9074, while a 2013 Chevrolet electric model has a price on average of \$11098. In this scenario the rest of car attributes such as odometer and size still vary among cars. 
+
+&nbsp;
+
+
+\section{Section 3.4: Boosting}
+
+The fourth statistical method used to predict prices is Boosting. The aim is to improve the prediction accuracy by using a method which, unlike Random Forest, grows decision trees sequentially. In this way each tree is fit using information from the previously grown trees. Both Random Forest and Boosting involve combining many decision trees, however, in Boosting each fitted tree can be thought of as “a modified version” of the previous tree. Each of the decision trees fitted in Boosting is usually small, but that contributes to the model’s ability to improve the predicted value of the output by adding a new crushed tree each time. 
+
+The two standard lambda values used most commonly for boosting are 0.1 and 0.2. Here the shrinkage parameter is set at 0.2 since it gives better MSE performance than 0.1
+
+The parameters chosen for boosting are as follows: 
+
+1)	Number of trees: 500
+2)	Shrinkage Parameter: 0.2
+3)	Interaction Depth: 4
+
+Table 3.4.1 presents the relative influence of each explanatory variable used in Boosting. Relative influence is a measure that indicates the relative importance of each variable used in training the model. The most important variables in the Boosting model are the manufactured year and odometer. This result coincides with Random Forest where the same variables were considered as the most important. 
+
+&nbsp;
+
+
+
+```{r setup 3, warning=FALSE, echo=FALSE, fig.show='hide'}
+data <- read.csv("https://raw.githubusercontent.com/zhenghao-li/Data_Mining/master/Data/X1.csv")
+
+data$make <- as.factor(data$make)
+data$car_type <- as.factor(data$car_type)
+data$car_size <- as.factor(data$car_size)
+data$made_in <- as.factor(data$made_in)
+data$Fuel_Engine <- as.factor(data$Fuel_Engine)
+data$transmission.type <- as.factor(data$transmission.type)
+data$transmission.speed <- as.factor(data$transmission.speed)
+data$drivetrain_ad <- as.factor(data$drivetrain_ad)
+data$drivetrain_ad2 <- as.factor(data$drivetrain_ad2)
+
+boost = gbm(price ~ ., data=car_train, interaction.depth=4, n.trees= 500, 
+            shrinkage=.2, distribution = "gaussian")
+yhat.boost=predict (boost ,newdata = car_test, type="response",
+                    n.trees =500)
+RelativeInfluence = as.data.table(summary(boost))
+Kable = kable(RelativeInfluence)
+add_header_above(Kable, "Table 3.4.1  Variable Relative Influence in Boosting")
+```
+
+&nbsp;
+
+
+\section{Section 4: Conclusions}
+
+The error rates (averaged RMSE) of the four statistical learning methods in 10 - fold cross validations are presented in the Table 4.1 below.
+
+According to the error rates, tree-based models: Random Forest and Boosting perform better on average than both Lasso and the Linear Model. Also, Random Forest performs on average slightly better than Boosting. So, the estimates from both random forest and boosting are used to summarize the effects of features on prices. However, consideration is made to Lasso as well because Lasso not only showed us an improvement over the linear model, but also has the advantage that it incurs less computation burden than two tree-based models.
+
+```{r setup 4.1.1, warning=FALSE, echo=FALSE, fig.show='hide'}
+X1 <- read.csv('https://raw.githubusercontent.com/zhenghao-li/Data_Mining/master/Data/X1.csv')[,-1]
+
+X1$make <- as.factor(X1$make)
+X1$car_type <- as.factor(X1$car_type)
+X1$car_size <- as.factor(X1$car_size)
+X1$made_in <- as.factor(X1$made_in)
+X1$Fuel_Engine <- as.factor(X1$Fuel_Engine)
+X1$transmission.type <- as.factor(X1$transmission.type)
+X1$transmission.speed <- as.factor(X1$transmission.speed)
+X1$drivetrain_ad <- as.factor(X1$drivetrain_ad)
+X1$drivetrain_ad2 <- as.factor(X1$drivetrain_ad2)
+
+X1$car_door=as.factor(X1$car_door)
+set.seed(777)
+rows=sample(nrow(X1))
+X1=X1[rows,]
+rmse = function(y, yhat) {
+  sqrt( mean( (y - yhat)^2 ) )
+}
+Loocv=data.frame()
+N=nrow(X1)
+M=4000
+max=N-M
+t0=Sys.time()
+for(i in seq(1, nrow(X1), by=M)) {
+  if (i<max){
+    X1_train = X1[-c(seq(i, i+M-1, by=1)),]
+    X1_test = X1[c(seq(i, i+M-1, by=1)),]
+   
+    X1lasso=model.matrix(price ~ .^2 , data=X1)[,-1]
+    X1lasso_train=X1lasso[-c(seq(i, i+M-1, by=1)),]
+    Y1lasso_train=X1_train$price
+   
+    X1lasso_test=X1lasso[c(seq(i, i+M-1, by=1)),]
+    Y1lasso_test=X1$price[c(seq(i, i+M-1, by=1))]
+   
+    lm_linear=lm(price ~ . , data = X1_train)
+    lasso=gamlr(X1lasso_train, Y1lasso_train, scale=TRUE, family = "poisson")
+    boost = gbm(price ~ ., data=X1_train, interaction.depth=4, n.trees= 500, shrinkage=.2, distribution = "gaussian")
+    rF = randomForest(price ~., data=X1_train, mtry = 5, ntree=200, importance= TRUE)
+   
+    yhat_test_linear = predict(lm_linear, X1_test)
+    yhat_test_lasso = predict(lasso, X1lasso_test, type="response", select = lasso$lambda.1se)
+    yhat_test_boost = predict(boost, X1_test, type="response", n.trees = 500)
+    yhat_test_rF = predict(rF, X1_test)
+   
+    result=c("rmse_linear" = rmse(X1_test$price, yhat_test_linear),
+             "rmse_lasso" = rmse(Y1lasso_test, yhat_test_lasso),
+             "rmse_boost" = rmse(X1_test$price, yhat_test_boost),
+             "rmse_rF" = rmse(X1_test$price, yhat_test_rF))
+   
+    Loocv=rbind(Loocv, result)
+  }
+  else {  X1_train = X1[-c(seq(i, nrow(X1), by=1)),]
+  X1_test = X1[c(seq(i, nrow(X1), by=1)),]
+ 
+  X1lasso= model.matrix(price ~ .^2 , data=X1)[,-1]
+  X1lasso_train=X1lasso[-c(seq(i, nrow(X1), by=1)),]
+  Y1lasso_train=X1_train$price
+ 
+  X1lasso_test=X1lasso[c(seq(i, nrow(X1), by=1)),]
+  Y1lasso_test=X1$price[c(seq(i, nrow(X1), by=1))]
+ 
+  lm_linear=lm(price ~ . , data = X1_train)
+  lasso=gamlr(X1lasso_train, Y1lasso_train, scale=TRUE, family = "poisson")
+  boost = gbm(price ~ ., data=X1_train, interaction.depth=4, n.trees= 500, shrinkage=.2, distribution = "gaussian")
+  rF = randomForest(price ~., data=X1_train, mtry = 5, ntree=200, importance= TRUE)
+ 
+  yhat_test_linear = predict(lm_linear, X1_test)
+  yhat_test_lasso = predict(lasso, X1lasso_test, type="response", select = lasso$lambda.1se)
+  yhat_test_boost = predict(boost, X1_test, type="response", n.trees = 500)
+  yhat_test_rF = predict(rF, X1_test)
+ 
+  result=c("rmse_linear" = rmse(X1_test$price, yhat_test_linear),
+           "rmse_lasso" = rmse(Y1lasso_test, yhat_test_lasso),
+           "rmse_boost" = rmse(X1_test$price, yhat_test_boost),
+           "rmse_rF" = rmse(X1_test$price, yhat_test_rF))
+ 
+  Loocv=rbind(Loocv, result)
+  }
+}
+colnames(Loocv)=c("rmse_linear","rmse_lasso", "rmse_boost", "rmse_RandomForest")
+Mean_RMSE=c("Linear"=mean(Loocv$rmse_linear),"Lasso"=mean(Loocv$rmse_lasso),
+             "Boosting"=mean(Loocv$rmse_boost), "Random_Forest"=mean(Loocv$rmse_RandomForest))
+Mean_RMSE <- as.data.frame(`Mean_RMSE`)
+kable(Mean_RMSE)
+```
+
+&nbsp;
+
+
+Both Random Forest and Boosting produce similar results regarding variable importance. The following variables: odometer, year manufactured, make, overall_width. Fuel_engine and fuel_capacity  are reported as most important. The partial effects graph of these variables (except make, which is shown by Table 4.1) are shown in Figure 1.4. The importance of of fuel_engine type and make is more subtle than expected. Examining the decision tree based model, it can be observed that odometer, year, overall_width, and fuel_capacity have non-linear effects on prices, among which increase in odometer will negatively affect price while increase in the other three will positively affect price.
+
+&nbsp;
+
+
+```{r setup partial effects graph, echo = FALSE, warning=FALSE, fig.width=14, fig.height=8}
+p1=plot(boost, i.var="odometer", n.trees=500)
+p2=plot(boost, i.var="year_factor", n.trees=500)
+p3=plot(boost, i.var="overall_width", n.trees=500)
+p4=plot(boost, i.var="fuel_capacity", n.trees=500)
+p5=plot(boost, i.var="Fuel_Engine", n.trees=500, cex=1.5, pch=9)
+grid.arrange(p1, p2, p3, p4, p5,layout_matrix = rbind(c(1,2),c(3,4), c(5,5)), 
+             top = textGrob("Figure 1.4: Partial Effects of Top 5 Important Variables", 
+              hjust = 0.5, gp=gpar(fontsize=15), vjust = 0.1))
+```
+
+&nbsp;
+
+
+Observing the statistical models’ results, we can generally see cars of some fuel_engine types, such as Flex-Fuel and Regular Unleaded Gas, have lower average prices. But since cars are almost different in every other specification, for cars in specific categories, the effects of fuel_engine types may be different. For make, the same argument can be applied. At last, for fuel_capacity, there exists an upper bound above which variations in fuel capacity do not change the partial effect.
+
+&nbsp;
+
+
+```{r setup table of makes, echo = FALSE, warning=FALSE, fig.width=14, fig.height=8.2}
+maketable=data.frame(pdp::partial(boost, pred.var = 'make', n.trees=500))
+maketable=maketable[order(-maketable$yhat),]
+rownames(maketable)=NULL
+colnames(maketable)[2]="average prices"
+Kable = kable(maketable)
+add_header_above(Kable, "Table 4.1: Predicted Prices for Each Make")
+```
+
+
+&nbsp;
+
+
+Following our previous method of approximating predicted prices given specific car attributes, the goal is to observe how the different type of engine fuel affects the listed price of used vehicles. Table illustrates approximations of the average predicted used vehicle prices given the cars are regular unleaded gas and electric, accounting for odometer readings. The approximations of the predicted prices are constructed by the Random Forest model as described in Section 3.3. As it can be seen, one could expect that Regular Unleaded Gas cars will be cheaper than Electric cars if the car has an odometer reading over 40000 and year manufactured 2017. However, the opposite is observed in the case of 2017 vehicles that have odometer readings between 10000 and 40000. Accounting for car makes and Hybrid vehicles do not change the conclusions of the Random Forest model predictions. The average predicted prices of more environmentally friendly cars are higher than regular cars in the odometer range above 40000 but lower in the odometer range between 10000 and 40000. 
+
+The above conclusions are rough approximations since no other variables are accounted for. However, as Random Forest and Boosting have reported, the most important variables are accounted for: make, manufactured year and odometer readings. Hence, it can be expected similar prices to prevail in actual online listings. 
+
+
+&nbsp;
+
+```{r setup PredictionsRF, warning=FALSE, echo=FALSE, fig.show='hide'}
+data <- read.csv("https://raw.githubusercontent.com/zhenghao-li/Data_Mining/master/Data/X1.csv")
+
+data$make <- as.factor(data$make)
+data$car_type <- as.factor(data$car_type)
+data$car_size <- as.factor(data$car_size)
+data$made_in <- as.factor(data$made_in)
+data$Fuel_Engine <- as.factor(data$Fuel_Engine)
+data$transmission.type <- as.factor(data$transmission.type)
+data$transmission.speed <- as.factor(data$transmission.speed)
+data$drivetrain_ad <- as.factor(data$drivetrain_ad)
+data$drivetrain_ad2 <- as.factor(data$drivetrain_ad2)
+
+
+yhat_forest14=predict(CarsRandomForest ,newdata = car_train[car_train$make == "BMW" & car_train$Fuel_Engine == "Electric" & car_train$odometer %between% c(10000, 40000) & car_train$year_factor == "2017",])
+M14 = mean(yhat_forest14)
+
+yhat_forest15=predict(CarsRandomForest ,newdata = car_train[car_train$make == "BMW" & car_train$Fuel_Engine == "Premium Unleaded Gas" & car_train$odometer %between% c(10000, 40000) & car_train$year_factor == "2017",])
+M15 = mean(yhat_forest15)
+
+yhat_forest16=predict(CarsRandomForest ,newdata = car_train[car_train$make == "BMW" & car_train$Fuel_Engine == "Electric" & 
+                                                              car_train$odometer %between% c(30000, 60000) & car_train$year_factor == "2016",])
+M16 = mean(yhat_forest16)
+
+yhat_forest17=predict(CarsRandomForest ,newdata = car_train[car_train$make == "BMW" & car_train$Fuel_Engine == "Premium Unleaded Gas" & 
+                                                              car_train$odometer %between% c(30000, 60000) & car_train$year_factor == "2016",])
+M17 = mean(yhat_forest17)
+
+yhat_forest6=predict(CarsRandomForest ,newdata = car_train[car_train$Fuel_Engine == "Electric" & car_train$odometer %between% c(20000, 40000) & car_train$year_factor == "2017",])
+M1 = mean(yhat_forest6)
+yhat_forest7=predict(CarsRandomForest ,newdata = car_train[car_train$Fuel_Engine == "Regular Unleaded Gas" & car_train$odometer %between% c(20000, 40000) & car_train$year_factor == "2017",])
+M2 = mean(yhat_forest7)
+yhat_forest8=predict(CarsRandomForest ,newdata = car_train[car_train$Fuel_Engine == "Electric" & car_train$odometer > 40000 & car_train$year_factor == "2017",])
+M3 = mean(yhat_forest8)
+yhat_forest9=predict(CarsRandomForest ,newdata = car_train[car_train$Fuel_Engine == "Regular Unleaded Gas" & car_train$odometer > 40000 & car_train$year_factor == "2017",])
+M4 = mean(yhat_forest9)
+yhat_forest10=predict(CarsRandomForest ,newdata = car_train[car_train$Fuel_Engine %in% c("Electric", "Hybrid") & car_train$odometer %between% c(20000, 40000) & car_train$year_factor == "2017" & car_train$make == "Chevrolet",])
+M5 = mean(yhat_forest10)
+yhat_forest11=predict(CarsRandomForest ,newdata = car_train[car_train$Fuel_Engine == "Regular Unleaded Gas" & car_train$odometer %between% c(20000, 40000) & car_train$year_factor == "2017" & car_train$make == "Chevrolet",])
+M6 = mean(yhat_forest11)
+yhat_forest12=predict(CarsRandomForest ,newdata = car_train[car_train$Fuel_Engine %in% c("Electric", "Hybrid") & car_train$odometer > 40000 & car_train$year_factor == "2017" & car_train$make == "Chevrolet",])
+M7 = mean(yhat_forest12)
+yhat_forest13=predict(CarsRandomForest ,newdata = car_train[car_train$Fuel_Engine == "Regular Unleaded Gas" & car_train$odometer > 40000 & car_train$year_factor == "2017" & car_train$make == "Chevrolet",])
+M8 = mean(yhat_forest13)
+`Average Predicted Prices` = c("2017 Electric BMW with odometer b/w 10000 and 40000" = mean(yhat_forest14),
+                               "2017 Gas BMW with odometer b/w 10000 and 40000" = mean(yhat_forest15),
+                               "2016 Electric BWM with odometer b/w 30000 and 60000" = mean(yhat_forest16),
+                               "2016 Gas BWM with odometer b/w 30000 and 60000" = mean(yhat_forest17),
+                                "2017 Electric models with odometer b/w 20000 and 40000" =
+                                 mean(yhat_forest6), "2017 Gas models with odometer b/w 20000 and 40000" =
+                                 mean(yhat_forest7),"2017 Electric models with odometer over 40000" =
+                                 mean(yhat_forest8), "2017 Gas models with odometer over 40000" =
+                                 mean(yhat_forest9),
+                               "2017 Electric/Hybrid Chevrolet with odometer b/w 20000 and 40000" =
+                                 mean(yhat_forest10), "2017 Gas Chevrolet with odometer b/w 20000 and 40000" =
+                                 mean(yhat_forest11), "2017 Electric/Hybrid Chevrolet with odometer over 40000" = mean(yhat_forest12),
+                               "2017 Regular Gas Chevrolet with odometer over 40000" =
+                                 mean(yhat_forest13))
+AvgPrice = as.data.frame(`Average Predicted Prices`)
+AvgPrice$`Average Predicted Prices` <- round(AvgPrice$`Average Predicted Prices`)
+kable(AvgPrice)
+
+```
+
+
+
+<!-- \section{Appendix} -->
+
+<!-- ```{r setup 2.1.4 appx, warning=FALSE, echo=FALSE} -->
+<!-- data <- read.csv("https://raw.githubusercontent.com/zhenghao-li/Data_Mining/master/Data/DataFinalProject_Final.csv") -->
+
+<!-- data$make <- as.factor(data$make) -->
+<!-- data$car_type <- as.factor(data$car_type) -->
+<!-- data$car_size <- as.factor(data$car_size) -->
+<!-- data$made_in <- as.factor(data$made_in) -->
+<!-- data$Fuel_Engine <- as.factor(data$Fuel_Engine) -->
+<!-- data$transmission.type <- as.factor(data$transmission.type) -->
+<!-- data$transmission.speed <- as.factor(data$transmission.speed) -->
+<!-- data$drivetrain_ad <- as.factor(data$drivetrain_ad) -->
+<!-- data$drivetrain_ad2 <- as.factor(data$drivetrain_ad2) -->
+
+
+<!-- DataFinalProject_Final$Type2 <- factor(DataFinalProject_Final$Type, labels = c("Diesel", "Electric","Flex-Fuel", -->
+<!--                                                                   "Gasoline",  "Hybrid", "Unleaded Gas")) -->
+<!--  #Use Type Column -->
+<!--  ModelTypeEngine <- with(DataFinalProject_Final, table(attributes.make, Type2)) -->
+
+<!--  ModelTypeEngineTable <- as.data.frame(ModelTypeEngine) -->
+<!--  ModelTypeEngineTable <- as.data.frame(ModelTypeEngine, responseName = "Count") -->
+
+<!--  ModelTypeEngineTable2 <- xtabs(Count ~ attributes.make + Type2, data = ModelTypeEngineTable) -->
+<!-- Kable = kable(ModelTypeEngineTable2) -->
+<!-- add_header_above(Kable, "Table 1.1 Car Models by Engine-Fuel Type") -->
+<!-- ``` -->
+
+
+<!-- ```{r lmmodelcoef appx, echo = FALSE, warning=FALSE} -->
+<!-- data <- read.csv("https://raw.githubusercontent.com/zhenghao-li/Data_Mining/master/Data/X1.csv") -->
+<!-- Kable = kable(coeff1) -->
+<!-- add_header_above(Kable, "Table 3.2.1 Coefficients of Hand-Built Linear Model") -->
+<!-- ```   -->
