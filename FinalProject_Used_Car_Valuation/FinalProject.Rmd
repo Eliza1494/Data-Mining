@@ -5,7 +5,7 @@ output: pdf_document
 
 
 ```{r setup, include=FALSE}
-data <- read.csv("https://raw.githubusercontent.com/zhenghao-li/Data_Mining/master/Data/X1.csv")
+data <- read.csv("https://raw.githubusercontent.com/Eliza1494/Data-Mining/master/FinalProjectData/DataFinalProject_Final.csv")
 library(tidyverse)
 library(mosaic)
 library(MASS) 
